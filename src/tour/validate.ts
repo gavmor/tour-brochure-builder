@@ -1,7 +1,6 @@
 /**
  * Runtime validation, repair and migration for tour data arriving from
- * untrusted places: a pasted share URL, an uploaded .json file, or a
- * localStorage blob written by an older build.
+ * untrusted places: a pasted share URL or an uploaded .json file.
  *
  * Policy: repair what is unambiguously repairable (missing ids, missing
  * titles, a `version: 1` flat tour, a single bad stop in an otherwise good

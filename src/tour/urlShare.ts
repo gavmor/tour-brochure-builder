@@ -129,6 +129,29 @@ export function buildShareLink(
   };
 }
 
+/**
+ * Put `hash` in the address bar without touching the history stack.
+ *
+ * Always `replaceState`, never `pushState`: the hash is rewritten on every
+ * mutation now (it is the only copy of the tour), and pushing would turn a
+ * minute of editing into dozens of history entries and make the Back button
+ * useless for leaving the app.
+ *
+ * Pass `""` to clear the hash. Returns the hash written, or null outside a
+ * browser / where the History API is unavailable.
+ */
+export function replaceLocationHash(hash: string): string | null {
+  const { history, location } = globalThis as Partial<Window> &
+    typeof globalThis;
+  if (!history?.replaceState || !location) return null;
+  history.replaceState(
+    null,
+    "",
+    `${location.pathname}${location.search}${hash}`,
+  );
+  return hash;
+}
+
 /** Read the current document hash. Returns an inert state outside a browser. */
 export function readLocationHash(): HashState {
   if (typeof globalThis.location === "undefined")

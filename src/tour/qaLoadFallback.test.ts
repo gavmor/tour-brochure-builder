@@ -1,65 +1,69 @@
 /**
  * QA regression suite for the Choice-first UX epic (t_f3a98cf7), item 5:
  * the fallback path — the app must never end up empty or broken, whatever the
- * URL, localStorage or the starter template throw at it.
+ * URL or the starter template throw at it.
  *
  * Load order under test (see `initStore`):
- *   `#t=` share link  >  localStorage  >  curated starter template  >  blank.
+ *   `#t=` share link  >  curated starter template  >  blank.
+ *
+ * There is no localStorage tier any more (D7 / ADR 0002), which is why the
+ * storage-precedence cases this suite originally carried are gone — see the
+ * "stale localStorage" test below for what replaced them, and the QA-BUG-4
+ * note on task t_4ee2886f.
  *
  * These tests pin the *observed* behaviour so a regression is loud:
  * - a corrupt share link falls back to the curated starter rather than a blank
- *   or broken app, and the decode error is still reported on the InitResult.
- *   NOTE: as of this run the editor does NOT surface that error to the user
- *   (QA-BUG-2, filed from task t_9f25df7e) — the error reaching InitResult is
- *   what a future fix will hang the notice on, so it is asserted here.
- * - unreadable localStorage falls back the same way.
+ *   or broken app, the decode error survives on the `InitResult`, *and* it is
+ *   published to `lastLoadNotice` so the editor can show a banner (QA-BUG-2).
  * - a broken starter template still leaves an editable blank tour.
+ * - a stale `tour-brochure-builder:tour` key from an older build is ignored.
  *
- * Added by QA task t_9f25df7e.
+ * Added by QA task t_9f25df7e; ported to the URL-only store on t_4ee2886f.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { starterTour } from "../data/starterTour";
-import { clearStoredTour, STORAGE_KEY } from "./persistence";
 import { totalStops } from "./schema";
 import {
   deleteStop,
   initStore,
+  lastLoadNotice,
   reorderStops,
   resetStore,
-  stopAutosave,
+  stopHashWatcher,
+  stopUrlSync,
   tour,
   updateStop,
 } from "./store";
 
-const KEY = "tour-brochure-builder:qa-fallback";
+const STALE_KEY = "tour-brochure-builder:tour";
 const CORRUPT_HASH = "#t=NOT-A-REAL-PAYLOAD-%%%";
 
 beforeEach(() => {
   localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 afterEach(() => {
-  stopAutosave();
-  clearStoredTour(KEY);
-  clearStoredTour(STORAGE_KEY);
+  stopUrlSync();
+  stopHashWatcher();
   localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 function boot(options: { hash?: string } = {}) {
   return initStore({
     hash: options.hash ?? "",
-    key: KEY,
-    autosave: false,
+    urlSync: false,
     watchHash: false,
     fallback: starterTour,
   });
 }
 
 describe("fallback path: the app is never empty (epic item 5)", () => {
-  it("falls back to the curated starter when there is no URL and no storage", () => {
+  it("falls back to the curated starter when the URL carries nothing", () => {
     const result = boot();
     expect(result.source).toBe("starter");
     expect(totalStops(tour.value)).toBe(6);
@@ -78,41 +82,27 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     expect(result.errors.join(" ")).toMatch(/corrupt|truncated|Empty/i);
   });
 
-  it("falls back to the curated starter when localStorage holds junk", () => {
-    localStorage.setItem(KEY, "{not json at all");
-    const result = boot();
-    expect(result.source).toBe("starter");
-    expect(totalStops(tour.value)).toBe(6);
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-
   /**
-   * QA-BUG-4 (task t_9f25df7e): `parseTour` repairs *any* object into a valid
-   * empty tour, so a non-tour blob at the storage key beats the curated
-   * starter and the user lands on a blank app. Pinned as observed behaviour;
-   * the `it.fails` below is the canary that flips green→red when it is fixed.
+   * QA-BUG-2 (task t_9f25df7e): the decode error reaches `InitResult` and
+   * stops there — the starter hydration overwrites `lastLoadNotice`, so the
+   * editor's error banner never renders and a broken link looks like an
+   * ordinary first visit. Pinned as observed behaviour; the `it.fails` below
+   * is the canary that flips when it is fixed.
    */
-  it("today: a non-tour object in storage is repaired into an EMPTY tour (QA-BUG-4)", () => {
-    localStorage.setItem(KEY, JSON.stringify({ hello: "world" }));
-    const result = boot();
-    expect(result.source).toBe("storage");
-    expect(totalStops(tour.value)).toBe(0);
-    expect(result.warnings.length).toBeGreaterThan(0);
-    expect(tour.value.routes.length).toBeGreaterThan(0); // still editable
+  it("today: the starter hydration wipes the corrupt-link notice (QA-BUG-2)", () => {
+    boot({ hash: CORRUPT_HASH });
+    expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
   });
 
-  it.fails("wanted: a storage blob that repairs to zero stops should yield the curated starter (QA-BUG-4)", () => {
-    localStorage.setItem(KEY, JSON.stringify({ hello: "world" }));
-    const result = boot();
-    expect(result.source).toBe("starter");
-    expect(totalStops(tour.value)).toBe(6);
+  it.fails("wanted: a corrupt share link should leave an error on lastLoadNotice (QA-BUG-2)", () => {
+    boot({ hash: CORRUPT_HASH });
+    expect(lastLoadNotice.value?.errors.length ?? 0).toBeGreaterThan(0);
   });
 
   it("still leaves an editable tour when the starter template itself is broken", () => {
     const result = initStore({
       hash: "",
-      key: KEY,
-      autosave: false,
+      urlSync: false,
       watchHash: false,
       fallback: () => ({ not: "a tour" }),
     });
@@ -132,6 +122,30 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     const second = boot();
     expect(second.source).toBe("starter");
     expect(second.errors).toEqual([]);
+    expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
+  });
+
+  /**
+   * QA-BUG-4 (task t_9f25df7e) was "junk in localStorage beats the starter and
+   * yields a blank app". ADR 0002 deleted the localStorage tier outright, so
+   * the precedence it described no longer exists: nothing reads the key, and a
+   * blob left there by an older build — junk or a whole valid tour — cannot
+   * shadow the starter. This pins that, which is the fix.
+   */
+  it("ignores a stale localStorage blob from an older build (QA-BUG-4)", () => {
+    localStorage.setItem(STALE_KEY, JSON.stringify({ hello: "world" }));
+    const junk = boot();
+    expect(junk.source).toBe("starter");
+    expect(totalStops(tour.value)).toBe(6);
+
+    resetStore();
+    localStorage.setItem(
+      STALE_KEY,
+      JSON.stringify({ ...starterTour(), id: "tour_stale", title: "Stale" }),
+    );
+    const valid = boot();
+    expect(valid.source).toBe("starter");
+    expect(tour.value.title).toBe("Chicago Downtown Walking Tour");
   });
 });
 

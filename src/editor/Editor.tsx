@@ -32,8 +32,8 @@ export function Editor() {
 
   // "Start blank": back out of the curated starter template (or any tour) into
   // an empty editable tour. There is no undo, so confirm first (task
-  // t_d7de7a2a). `newTour()` goes through the normal store path, so autosave
-  // then persists the empty tour and a reload stays blank.
+  // t_d7de7a2a). `newTour()` goes through the normal store path, so the URL
+  // writer encodes the empty tour into the hash and a reload stays blank.
   const startBlank = () => {
     const ask =
       typeof window === "undefined"

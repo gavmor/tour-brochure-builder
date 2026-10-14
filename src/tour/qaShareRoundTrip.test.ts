@@ -22,7 +22,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { starterTour } from "../data/starterTour";
 import { v1Tour } from "./fixtures";
-import { clearStoredTour } from "./persistence";
 import {
   cloneTour,
   DEFAULT_ROUTE_PROFILE,
@@ -41,21 +40,19 @@ import {
   resetStore,
   setTourMeta,
   shareLink,
-  stopAutosave,
+  stopHashWatcher,
+  stopUrlSync,
   tour,
   updateRoute,
   updateStop,
 } from "./store";
 import { buildHash, decodeTour, encodeTour, parseHash } from "./urlShare";
 
-const KEY = "tour-brochure-builder:qa-roundtrip";
-
-/** Boot the app the way `main.tsx` does, with no URL and nothing stored. */
+/** Boot the app the way `main.tsx` does, with nothing in the URL. */
 function firstLoad() {
   return initStore({
     hash: "",
-    key: KEY,
-    autosave: false,
+    urlSync: false,
     watchHash: false,
     fallback: starterTour,
   });
@@ -80,14 +77,14 @@ function editTheSeededTour(): Tour {
 }
 
 beforeEach(() => {
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 afterEach(() => {
-  stopAutosave();
-  clearStoredTour(KEY);
-  localStorage.clear();
+  stopUrlSync();
+  stopHashWatcher();
+  window.location.hash = "";
   resetStore();
 });
 
@@ -122,13 +119,11 @@ describe("seeded -> edited -> share URL -> fresh load (epic item 7)", () => {
     const edited = editTheSeededTour();
     const hash = buildHash(edited, { view: true });
 
-    // A different browser: no localStorage, only the pasted URL.
+    // A different browser: nothing but the pasted URL.
     resetStore();
-    localStorage.clear();
     const boot = initStore({
       hash,
-      key: KEY,
-      autosave: false,
+      urlSync: false,
       watchHash: false,
       fallback: starterTour,
     });

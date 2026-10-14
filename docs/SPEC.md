@@ -21,6 +21,7 @@ provisional**. D2–D4 are recommended defaults Gavin has not ruled on and are m
 | D4 | Route lines | **Straight polylines** in v1, one per route, colored per route. Road-snapped routing (OSRM/GraphHopper) deferred. | **SUPERSEDED** by Gavin on t_d408c860 — routes must follow streets. Storage settled in [ADR 0001](adr/0001-route-geometry-storage.md): geometry is recomputed on load, never stored in the share URL. |
 | D5 | Data shape *(forced by D1)* | `Tour → Route[] → Stop[]`. Numbering restarts at 1 within each route. **Supersedes the flat `Tour.stops[]` in card t_f9d14b37.** | **Confirmed** (implied by Gavin's comment) |
 | D6 | Stop copy has two lengths | `Stop.blurb` (one line, itinerary) and `Stop.description` (paragraph, detail card). | PROVISIONAL |
+| D7 | Where state lives | **The URL hash, and nowhere else.** No `localStorage`. Boot order: hash → starter template → blank; every mutation rewrites the hash via `replaceState`; clearing the hash returns to the starter. Rationale and costs in [ADR 0002](adr/0002-url-sole-source-of-truth.md). | **Confirmed** (Gavin, card t_0306d86f) — supersedes the localStorage-as-convenience-layer note on epic t_442984bb |
 
 ### D1 — Layout target (confirmed)
 
@@ -53,7 +54,8 @@ so the spec carries both presentations — see D6 and §3.
 A share link is `…/#view&t=<encoded>`. It opens the brochure read-only: no map editing, no
 marker drag, no edit panel, no add/delete. The header shows **Print** and
 **Copy share link**, plus **Edit a copy**, which loads the decoded tour into the editor
-with a fresh `tour.id` and writes it to localStorage as the working tour. The original
+with a fresh `tour.id` and takes over the address bar as an editable `#t=` link (D7; it
+used to write the copy to localStorage, which no longer exists). The original
 link keeps working, since the tour lives in the URL and nothing is mutated server-side.
 Rationale: with no backend there is no auth, so an editable share link would mean anyone
 with the URL silently forking the author's state inside their own browser — confusing, and
@@ -307,8 +309,11 @@ editor; the starred ones block final brochure sign-off.
    route 1, is a scope call. Recommendation: ship add/rename/recolor-route in v1, since the
    reference's whole point is two routes and a legend — but it is cuttable if the smoke
    pass is at risk.
-8. **Does "Edit a copy" need a confirm step** when it would overwrite an existing working
-   tour in localStorage? Recommendation: yes, one dialog. Low cost, prevents data loss.
+8. ~~**Does "Edit a copy" need a confirm step** when it would overwrite an existing working
+   tour in localStorage?~~ **Resolved by D7 / [ADR 0002](adr/0002-url-sole-source-of-truth.md):
+   no. There is no localStorage slot to overwrite — the only thing a copy replaces is the
+   hash currently on screen, which the user is looking at and still holds wherever they
+   were sent it. The dialog is gone.
 
 ---
 
@@ -318,6 +323,11 @@ editor; the starred ones block final brochure sign-off.
   clients truncate. With lz-string over `#t=`, 30 stops of title + blurb + description +
   image URL is near that line. The store should expose the encoded length, and the Copy
   link button should warn above 6 k rather than emit a link that silently dies.
+  Since D7 the *working* URL is subject to the same budget, not just links that get sent.
+- **No other store for tour state.** No `localStorage`, no cookies, no IndexedDB
+  (D7 / ADR 0002). The address bar is the save file. This covers *tour state* only — a
+  derived, recomputable cache (e.g. the route-geometry `sessionStorage` tier proposed in
+  ADR 0001) is not tour state and is not forbidden by it.
 - **OSM tile policy.** Visible `© OpenStreetMap contributors` on screen *and* in print,
   maxZoom 19, no bulk prefetch. Non-negotiable; it is the licence terms.
 - **Print tile loading.** Tiles load async, so a Print button must wait for the map's
