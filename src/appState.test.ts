@@ -1,27 +1,32 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   activeView,
   editCopyFlow,
-  editCopyPrompt,
   showBrochure,
   showEditor,
   viewMode,
-  workingTourAtRisk,
 } from "./appState";
 import { twoRouteTour } from "./tour/fixtures";
-import { clearStoredTour, saveTour } from "./tour/persistence";
-import { createRoute, createStop, createTour } from "./tour/schema";
-import { loadTour, readOnly, resetStore, tour } from "./tour/store";
+import {
+  loadTour,
+  readOnly,
+  resetStore,
+  stopHashWatcher,
+  stopUrlSync,
+  tour,
+} from "./tour/store";
+import { decodeTour, parseHash } from "./tour/urlShare";
 
 beforeEach(() => {
   resetStore();
-  clearStoredTour();
   viewMode.value = "editor";
   window.location.hash = "";
 });
 
 afterEach(() => {
-  clearStoredTour();
+  stopUrlSync();
+  stopHashWatcher();
+  window.location.hash = "";
 });
 
 describe("activeView", () => {
@@ -43,37 +48,6 @@ describe("activeView", () => {
   });
 });
 
-describe("workingTourAtRisk", () => {
-  it("is null when nothing is saved", () => {
-    expect(workingTourAtRisk()).toBe(null);
-  });
-
-  it("is null when the saved tour is the one being viewed", () => {
-    const current = twoRouteTour();
-    loadTour(current);
-    saveTour(tour.value);
-    expect(workingTourAtRisk()).toBe(null);
-  });
-
-  it("is null when the saved tour is empty — nothing to lose", () => {
-    saveTour(createTour({ id: "tour_empty", title: "Untitled tour" }));
-    loadTour(twoRouteTour(), { readOnly: true });
-    expect(workingTourAtRisk()).toBe(null);
-  });
-
-  it("reports a different saved tour that has stops", () => {
-    saveTour(
-      createTour({
-        id: "tour_mine",
-        title: "My draft",
-        routes: [createRoute({ stops: [createStop({ lat: 1, lng: 2 })] })],
-      }),
-    );
-    loadTour(twoRouteTour(), { readOnly: true });
-    expect(workingTourAtRisk()?.title).toBe("My draft");
-  });
-});
-
 describe("editCopyFlow", () => {
   function openSharedTour() {
     loadTour(twoRouteTour(), { readOnly: true });
@@ -84,7 +58,7 @@ describe("editCopyFlow", () => {
     const sharedId = tour.value.id;
     viewMode.value = "brochure";
 
-    const copy = editCopyFlow({ confirm: () => true });
+    const copy = editCopyFlow();
 
     expect(copy).not.toBe(null);
     expect(tour.value.id).not.toBe(sharedId);
@@ -93,57 +67,24 @@ describe("editCopyFlow", () => {
     expect(tour.value.title).toBe("Downtown Tour (copy)");
   });
 
-  it("asks before overwriting a different saved tour, and backs off on no", () => {
-    saveTour(
-      createTour({
-        id: "tour_mine",
-        title: "My draft",
-        routes: [createRoute({ stops: [createStop({ lat: 1, lng: 2 })] })],
-      }),
+  it("swaps the read-only share hash for the copy's editable one", () => {
+    const shared = twoRouteTour();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}#view&t=abc123`,
     );
-    openSharedTour();
-    const sharedId = tour.value.id;
-    const confirm = vi.fn((_message: string) => false);
+    loadTour(shared, { readOnly: true });
 
-    const copy = editCopyFlow({ confirm });
+    const copy = editCopyFlow();
 
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0]).toContain("My draft");
-    expect(copy).toBe(null);
-    // Nothing moved: still the shared tour, still read-only.
-    expect(tour.value.id).toBe(sharedId);
-    expect(readOnly.value).toBe(true);
-  });
-
-  it("does not ask when there is nothing at risk", () => {
-    openSharedTour();
-    const confirm = vi.fn(() => true);
-    editCopyFlow({ confirm });
-    expect(confirm).not.toHaveBeenCalled();
-  });
-
-  it("drops the share payload from the URL without re-opening it", () => {
-    const hash = "#view&t=abc123";
-    window.history.replaceState(null, "", `${window.location.pathname}${hash}`);
-    openSharedTour();
-
-    editCopyFlow({ confirm: () => true });
-
-    // replaceState (not location.hash = "") — assigning would fire hashchange
-    // and the store's watcher would reload the shared tour read-only.
-    expect(window.location.hash).toBe("");
+    // replaceState (not location.hash = …), so no hashchange fires and the
+    // watcher cannot re-open the shared tour read-only over the copy.
+    const state = parseHash(window.location.hash);
+    expect(state.view).toBe(false);
+    expect(state.encoded).toBeTruthy();
+    const decoded = decodeTour(state.encoded ?? "");
+    expect(decoded.ok && decoded.tour.id).toBe(copy?.id);
     expect(readOnly.value).toBe(false);
-  });
-});
-
-describe("editCopyPrompt", () => {
-  it("names the tour and its size so the choice is informed", () => {
-    const stored = createTour({
-      title: "My draft",
-      routes: [createRoute({ stops: [createStop({ lat: 1, lng: 2 })] })],
-    });
-    const message = editCopyPrompt(stored);
-    expect(message).toContain("My draft");
-    expect(message).toContain("1 stop");
   });
 });

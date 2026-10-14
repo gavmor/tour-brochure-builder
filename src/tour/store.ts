@@ -3,19 +3,18 @@
  * brochure view consume. Mutations are immutable replacements of `tour.value`,
  * so every dependent signal/component re-renders.
  *
+ * **The URL hash is the only place a tour lives.** There is no localStorage
+ * layer: every mutation is re-encoded into the hash via `history.replaceState`
+ * (see `startUrlSync`), and clearing the hash clears the work and returns to
+ * the starter template. See `docs/adr/0002-url-sole-source-of-truth.md`.
+ *
  * Read-only mode (a `#view` share link, SPEC D2) hard-blocks mutating actions
- * and autosave, so opening someone else's link can never shadow or overwrite
- * the working tour in localStorage. `editCopy()` is the explicit way out.
+ * and URL writes, so opening someone else's link can never rewrite the hash
+ * out from under the link you were sent. `editCopy()` is the explicit way out.
  */
 
 import { batch, computed, effect, signal } from "@preact/signals";
-import {
-  AUTOSAVE_DELAY_MS,
-  createAutosaver,
-  loadStoredTour,
-  STORAGE_KEY,
-  saveTour,
-} from "./persistence";
+import { type Debounced, debounce, URL_SYNC_DELAY_MS } from "./debounce";
 import {
   cloneTour,
   createRoute,
@@ -30,13 +29,15 @@ import {
   totalStops,
 } from "./schema";
 import {
+  buildHash,
   buildShareLink,
   decodeTour,
   parseHash,
   readLocationHash,
+  replaceLocationHash,
   type ShareLink,
 } from "./urlShare";
-import { type ParseResult, parseTour } from "./validate";
+import { type ParseResult, parseTour, serializeTour } from "./validate";
 
 /** The working tour. Treat as read-only outside this module. */
 export const tour = signal<Tour>(createTour());
@@ -353,7 +354,8 @@ export function newTour(init: Partial<Tour> = {}): Tour {
 /**
  * "Edit a copy" (SPEC D2): take the currently viewed tour, give it a fresh
  * `tour.id`, drop read-only, and make it the working tour. The shared link
- * keeps working because nothing shared is mutated.
+ * keeps working because nothing shared is mutated — the copy simply takes over
+ * the address bar as an editable `#t=` hash on the next URL sync.
  */
 export function editCopy(options: { titleSuffix?: string } = {}): Tour {
   const copy = cloneTour(tour.value);
@@ -365,54 +367,90 @@ export function editCopy(options: { titleSuffix?: string } = {}): Tour {
     activeRouteId.value = copy.routes[0]?.id ?? null;
     selectedStopId.value = null;
   });
-  saveTour(copy);
   return copy;
 }
 
-// -------------------------------------------------------------------- autosave
-
-let disposeAutosave: (() => void) | null = null;
+// -------------------------------------------------------------------- URL sync
 
 /**
- * Debounced localStorage autosave. Never writes in read-only mode, so a
- * shared link cannot clobber the viewer's own tour.
+ * The starter template, as the caller injected it and as canonical JSON.
+ *
+ * The snapshot is the "no diff yet" baseline: while the working tour still
+ * serializes to exactly this, the hash stays empty, so a pristine app has a
+ * bare, short, shareable URL. The first real edit puts a `#t=` hash there and
+ * every later edit updates it.
  */
-export function startAutosave(
-  options: { key?: string; delay?: number } = {},
-): () => void {
-  stopAutosave();
-  const save = createAutosaver(
-    options.key ?? STORAGE_KEY,
-    options.delay ?? AUTOSAVE_DELAY_MS,
+let fallbackFactory: (() => Tour | unknown) | null = null;
+let fallbackSnapshot: string | null = null;
+
+/** The last hash this module wrote, so the watcher can ignore its own echo. */
+let lastWrittenHash: string | null = null;
+
+let pendingUrlWrite: Debounced<[Tour]> | null = null;
+let disposeUrlSync: (() => void) | null = null;
+
+/** The hash a given tour should occupy: empty while it still is the starter. */
+export function hashForTour(candidate: Tour): string {
+  if (
+    fallbackSnapshot !== null &&
+    serializeTour(candidate) === fallbackSnapshot
+  )
+    return "";
+  return buildHash(candidate, { view: false });
+}
+
+function writeHash(candidate: Tour): string | null {
+  if (readOnly.peek()) return null;
+  const hash = hashForTour(candidate);
+  lastWrittenHash = hash;
+  return replaceLocationHash(hash);
+}
+
+/**
+ * Mirror every mutation into the URL hash, debounced so a burst of keystrokes
+ * costs one `history.replaceState`. Never writes in read-only mode, so a
+ * `#view` link is not rewritten into an editable one behind the viewer's back.
+ */
+export function startUrlSync(options: { delay?: number } = {}): () => void {
+  stopUrlSync();
+  const write = debounce<[Tour]>(
+    (candidate) => writeHash(candidate),
+    options.delay ?? URL_SYNC_DELAY_MS,
   );
+  pendingUrlWrite = write;
   const dispose = effect(() => {
     const current = tour.value;
     if (readOnly.value) return;
-    save(current);
+    write(current);
   });
-  disposeAutosave = () => {
-    save.flush();
+  disposeUrlSync = () => {
+    write.cancel();
     dispose();
+    if (pendingUrlWrite === write) pendingUrlWrite = null;
   };
-  return stopAutosave;
+  return stopUrlSync;
 }
 
-export function stopAutosave(): void {
-  disposeAutosave?.();
-  disposeAutosave = null;
+export function stopUrlSync(): void {
+  disposeUrlSync?.();
+  disposeUrlSync = null;
 }
 
-/** Force a synchronous save (e.g. on `beforeunload`). */
-export function saveNow(key = STORAGE_KEY): boolean {
-  if (readOnly.value) return false;
-  return saveTour(tour.value, key);
+/**
+ * Write the working tour to the address bar right now, skipping the debounce
+ * (e.g. straight after "Edit a copy", so the `#view` link is replaced by an
+ * editable one before the user can copy it).
+ */
+export function syncUrlNow(): string | null {
+  pendingUrlWrite?.cancel();
+  return writeHash(tour.peek());
 }
 
 // ------------------------------------------------------------------ bootstrap
 
 export interface InitResult {
   /** Where the tour came from. `starter` is the curated template fallback. */
-  source: "url" | "storage" | "starter" | "new";
+  source: "url" | "starter" | "new";
   readOnly: boolean;
   warnings: string[];
   errors: string[];
@@ -434,17 +472,59 @@ export function applyHash(hash: string): ParseResult | null {
   return decoded;
 }
 
+/**
+ * Hydrate the starter template (or a blank tour when no fallback was injected,
+ * or when the injected one is unusable). Returns where the tour came from.
+ */
+function hydrateFallback(result: InitResult): "starter" | "new" {
+  if (fallbackFactory) {
+    const seeded = loadTour(fallbackFactory());
+    if (seeded.ok) {
+      result.warnings = seeded.warnings;
+      return "starter";
+    }
+    // A broken fallback must never strand the user on an empty app.
+    result.errors.push(...seeded.errors);
+  }
+  newTour();
+  return "new";
+}
+
+/**
+ * Reset to the starter template. This is what "clearing the URL clears the
+ * work" means: no hash, no diff.
+ */
+export function resetToFallback(): InitResult {
+  const result: InitResult = {
+    source: "new",
+    readOnly: false,
+    warnings: [],
+    errors: [],
+  };
+  result.source = hydrateFallback(result);
+  return result;
+}
+
 let disposeHashWatcher: (() => void) | null = null;
 
 /**
- * React to in-session hash changes, so pasting a share link into the address
- * bar of an already-open app swaps the tour instead of doing nothing.
+ * React to hash changes the *user* makes: pasting a share link into the
+ * address bar swaps the tour, and deleting the hash throws the work away and
+ * returns to the starter.
+ *
+ * The app's own writes go through `history.replaceState`, which by spec does
+ * not fire `hashchange` — and the echo guard below makes that belt-and-braces,
+ * so a URL write can never feed back into a reload.
  */
 export function startHashWatcher(): () => void {
   stopHashWatcher();
   if (typeof window === "undefined") return stopHashWatcher;
   const onHashChange = () => {
-    applyHash(window.location.hash);
+    const raw = window.location.hash;
+    if (lastWrittenHash !== null && raw === lastWrittenHash) return;
+    lastWrittenHash = null;
+    if (parseHash(raw).encoded) applyHash(raw);
+    else resetToFallback();
   };
   window.addEventListener("hashchange", onHashChange);
   disposeHashWatcher = () =>
@@ -458,28 +538,33 @@ export function stopHashWatcher(): void {
 }
 
 /**
- * Load order on startup: a `#t=` share link wins over localStorage, which
- * wins over the `fallback` (the curated starter template), which wins over a
- * blank tour. A `#view` link opens read-only and does not autosave.
+ * Load order on startup: a `#t=` / `#view&t=` hash wins over the `fallback`
+ * (the curated starter template), which wins over a blank tour. There is no
+ * localStorage step — a bare URL therefore *always* opens the starter, which
+ * is what fixes "a returning visitor sees a blank map".
  *
  * `fallback` keeps the generic tour layer free of any dependency on app content
  * (`src/data`): the caller — `main.tsx` — injects the starter template. When no
- * fallback is given, a first visit gets a blank editable tour, exactly as
- * before, so nothing here changes for tests or embedders that omit it.
+ * fallback is given, a first visit gets a blank editable tour.
  */
 export function initStore(
   options: {
     hash?: string;
-    key?: string;
-    autosave?: boolean;
+    urlSync?: boolean;
     watchHash?: boolean;
-    /** Produces the tour to hydrate when there is no URL or stored tour. */
+    /** Produces the tour to hydrate when the URL carries none. */
     fallback?: () => Tour | unknown;
   } = {},
 ): InitResult {
-  const key = options.key ?? STORAGE_KEY;
   const hash =
     options.hash === undefined ? readLocationHash() : parseHash(options.hash);
+
+  fallbackFactory = options.fallback ?? null;
+  fallbackSnapshot = null;
+  if (fallbackFactory) {
+    const baseline = parseTour(fallbackFactory());
+    if (baseline.ok) fallbackSnapshot = serializeTour(baseline.tour);
+  }
 
   const result: InitResult = {
     source: "new",
@@ -488,7 +573,7 @@ export function initStore(
     errors: [],
   };
   const finish = () => {
-    if (options.autosave !== false) startAutosave({ key });
+    if (options.urlSync !== false) startUrlSync();
     if (options.watchHash !== false) startHashWatcher();
     return result;
   };
@@ -502,39 +587,22 @@ export function initStore(
       result.warnings = decoded.warnings;
       return finish();
     }
+    // A corrupt payload is not worth stranding the user over: fall through to
+    // the starter, and let the URL writer replace the broken hash.
     result.errors.push(...decoded.errors);
   }
 
-  const stored = loadStoredTour(key);
-  if (stored?.ok) {
-    loadTour(stored.tour);
-    result.source = "storage";
-    result.warnings = stored.warnings;
-    return finish();
-  }
-  if (stored && !stored.ok) result.errors.push(...stored.errors);
-
-  // No URL and no stored tour: hydrate the curated starter template, so a
-  // first visit opens a populated, fully-editable tour instead of a blank map.
-  if (options.fallback) {
-    const seeded = loadTour(options.fallback());
-    if (seeded.ok) {
-      result.source = "starter";
-      result.warnings = seeded.warnings;
-      return finish();
-    }
-    // A broken fallback must never strand the user on an empty app.
-    result.errors.push(...seeded.errors);
-  }
-
-  newTour();
+  result.source = hydrateFallback(result);
   return finish();
 }
 
 /** Test seam: reset every signal to a pristine state. */
 export function resetStore(): void {
-  stopAutosave();
+  stopUrlSync();
   stopHashWatcher();
+  fallbackFactory = null;
+  fallbackSnapshot = null;
+  lastWrittenHash = null;
   batch(() => {
     tour.value = createTour();
     readOnly.value = false;

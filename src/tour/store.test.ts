@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bigTour, twoRouteTour, v1Tour } from "./fixtures";
-import { clearStoredTour, loadStoredTour, saveTour } from "./persistence";
 import { createStop, ROUTE_COLORS, type Tour } from "./schema";
 import {
   activeRoute,
@@ -21,36 +20,49 @@ import {
   reorderRoutes,
   reorderStops,
   resetStore,
-  saveNow,
   selectedStopId,
   setTourMeta,
   shareEncodedLength,
   shareUrlWarning,
-  startAutosave,
   startHashWatcher,
-  stopAutosave,
+  startUrlSync,
   stopCount,
   stopHashWatcher,
+  stopUrlSync,
+  syncUrlNow,
   tour,
   updateRoute,
   updateStop,
 } from "./store";
-import { buildHash, encodeTour } from "./urlShare";
+import { buildHash, decodeTour, encodeTour, parseHash } from "./urlShare";
 import { serializeTour } from "./validate";
-
-const TEST_KEY = "tbb-test-key";
 
 function titles(t: Tour, routeIndex = 0) {
   return t.routes[routeIndex].stops.map((s) => s.title);
 }
 
+/** The tour currently encoded in `window.location.hash`, decoded back out. */
+function tourInUrl(): Tour | null {
+  const { encoded } = parseHash(window.location.hash);
+  if (!encoded) return null;
+  const decoded = decodeTour(encoded);
+  return decoded.ok ? decoded.tour : null;
+}
+
+function lastStopTitle(t: Tour | null, routeIndex = 0): string | undefined {
+  const stops = t?.routes[routeIndex]?.stops ?? [];
+  return stops[stops.length - 1]?.title;
+}
+
 beforeEach(() => {
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 afterEach(() => {
-  stopAutosave();
+  stopUrlSync();
+  stopHashWatcher();
+  window.location.hash = "";
   vi.useRealTimers();
 });
 
@@ -329,11 +341,12 @@ describe("read-only mode (SPEC D2)", () => {
     expect(serializeTour(tour.value)).toBe(before);
   });
 
-  it("never writes to localStorage", () => {
-    startAutosave({ key: TEST_KEY, delay: 0 });
+  it("never writes to the URL", () => {
+    window.location.hash = "#view&t=untouched";
+    startUrlSync({ delay: 0 });
     addStop({ lat: 1, lng: 2 });
-    expect(saveNow(TEST_KEY)).toBe(false);
-    expect(localStorage.getItem(TEST_KEY)).toBeNull();
+    expect(syncUrlNow()).toBeNull();
+    expect(window.location.hash).toBe("#view&t=untouched");
   });
 });
 
@@ -355,11 +368,14 @@ describe("editCopy", () => {
     expect(tour.value.routes[0].stops).toHaveLength(4);
   });
 
-  it("writes the copy to localStorage as the working tour", () => {
+  it("takes over the address bar as an editable hash", () => {
+    window.location.hash = buildHash(twoRouteTour()); // a `#view&t=` link
     loadTour(twoRouteTour(), { readOnly: true });
     const copy = editCopy();
-    const stored = loadStoredTour();
-    expect(stored?.ok && stored.tour.id).toBe(copy.id);
+
+    syncUrlNow();
+    expect(parseHash(window.location.hash).view).toBe(false);
+    expect(tourInUrl()?.id).toBe(copy.id);
   });
 });
 
@@ -383,66 +399,145 @@ describe("share length signals", () => {
   });
 });
 
-describe("localStorage autosave", () => {
-  it("debounces writes and persists the latest tour", () => {
+describe("URL sync", () => {
+  it("debounces writes and converges on the current tour", () => {
     vi.useFakeTimers();
-    newTour({ title: "Autosaved" });
-    startAutosave({ key: TEST_KEY, delay: 400 });
+    newTour({ title: "Synced" });
+    startUrlSync({ delay: 400 });
 
     addStop({ lat: 41.1, lng: -87.1, title: "One" });
     addStop({ lat: 41.2, lng: -87.2, title: "Two" });
-    expect(localStorage.getItem(TEST_KEY)).toBeNull(); // still debounced
+    expect(window.location.hash).toBe(""); // still debounced
 
     vi.advanceTimersByTime(400);
-    const stored = loadStoredTour(TEST_KEY);
-    expect(stored?.ok).toBe(true);
-    if (stored?.ok) {
-      expect(stored.tour.title).toBe("Autosaved");
-      expect(stored.tour.routes[0].stops.map((s) => s.title)).toEqual([
-        "One",
-        "Two",
-      ]);
-    }
+    const inUrl = tourInUrl();
+    expect(inUrl?.title).toBe("Synced");
+    expect(inUrl?.routes[0].stops.map((s) => s.title)).toEqual(["One", "Two"]);
   });
 
-  it("stops writing after stopAutosave", () => {
+  it.each([
+    ["add a stop", () => void addStop({ lat: 41.3, lng: -87.3, title: "Add" })],
+    ["move a stop", () => void moveStop("stop_skydeck", 41.9, -87.9)],
+    ["edit text", () => void updateStop("stop_skydeck", { title: "Typed" })],
+    ["delete a stop", () => void deleteStop("stop_bridge")],
+    ["reorder stops", () => void reorderStops(0, 2)],
+    ["change a route", () => void updateRoute("route_red", { name: "Rouge" })],
+    ["edit tour meta", () => void setTourMeta({ title: "Renamed" })],
+  ])("writes the hash after: %s", (_label, mutateTour) => {
+    vi.useFakeTimers();
+    loadTour(twoRouteTour());
+    startUrlSync({ delay: 300 });
+    vi.advanceTimersByTime(300);
+    const before = window.location.hash;
+
+    mutateTour();
+    vi.advanceTimersByTime(300);
+
+    expect(window.location.hash).not.toBe(before);
+    expect(serializeTour(tourInUrl() as Tour)).toBe(serializeTour(tour.value));
+  });
+
+  it("replaces the history entry instead of pushing one", () => {
+    vi.useFakeTimers();
+    const push = vi.spyOn(window.history, "pushState");
+    const replace = vi.spyOn(window.history, "replaceState");
+    const lengthBefore = window.history.length;
+
+    loadTour(twoRouteTour());
+    startUrlSync({ delay: 300 });
+    for (let i = 0; i < 5; i++) {
+      addStop({ lat: 41 + i / 100, lng: -87, title: `Stop ${i}` });
+      vi.advanceTimersByTime(300);
+    }
+
+    expect(replace).toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(window.history.length).toBe(lengthBefore);
+  });
+
+  it("stops writing after stopUrlSync", () => {
     vi.useFakeTimers();
     newTour({ title: "Transient" });
-    startAutosave({ key: TEST_KEY, delay: 400 });
-    stopAutosave();
-    localStorage.removeItem(TEST_KEY);
+    startUrlSync({ delay: 400 });
+    stopUrlSync();
     addStop({ lat: 1, lng: 2 });
     vi.advanceTimersByTime(1000);
-    expect(localStorage.getItem(TEST_KEY)).toBeNull();
+    expect(window.location.hash).toBe("");
   });
 
-  it("saveNow writes synchronously", () => {
+  it("syncUrlNow writes synchronously, skipping the debounce", () => {
+    vi.useFakeTimers();
     newTour({ title: "Immediate" });
-    expect(saveNow(TEST_KEY)).toBe(true);
-    const stored = loadStoredTour(TEST_KEY);
-    expect(stored?.ok && stored.tour.title).toBe("Immediate");
+    startUrlSync({ delay: 400 });
+    addStop({ lat: 1, lng: 2, title: "Now" });
+
+    expect(syncUrlNow()).not.toBe("");
+    expect(tourInUrl()?.title).toBe("Immediate");
+  });
+
+  it("leaves the hash bare while the tour still is the starter template", () => {
+    vi.useFakeTimers();
+    initStore({
+      hash: "",
+      fallback: twoRouteTour,
+      watchHash: false,
+    });
+    vi.advanceTimersByTime(1000);
+    // Nothing has been changed yet: no diff, so nothing in the URL.
+    expect(window.location.hash).toBe("");
+
+    addStop({ lat: 41.4, lng: -87.4, title: "A diff" });
+    vi.advanceTimersByTime(1000);
+    expect(lastStopTitle(tourInUrl())).toBe("A diff");
+  });
+
+  it("never touches window.localStorage", () => {
+    const original = Object.getOwnPropertyDescriptor(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("localStorage must not be used (ADR 0002)");
+      },
+    });
+    try {
+      const result = initStore({
+        hash: "",
+        fallback: twoRouteTour,
+        watchHash: false,
+      });
+      expect(result.source).toBe("starter");
+
+      addStop({ lat: 1, lng: 2, title: "No storage here" });
+      syncUrlNow();
+      expect(lastStopTitle(tourInUrl())).toBe("No storage here");
+    } finally {
+      stopUrlSync();
+      if (original) Object.defineProperty(window, "localStorage", original);
+      else Reflect.deleteProperty(window, "localStorage");
+    }
   });
 });
 
 describe("initStore load order", () => {
-  it("restores the last tour from localStorage (reload case)", () => {
-    const saved = twoRouteTour();
-    saveTour(saved, TEST_KEY);
-    resetStore();
-
-    const result = initStore({ hash: "", key: TEST_KEY, autosave: false });
-    expect(result.source).toBe("storage");
+  it("opens the starter on a bare URL — there is no storage step", () => {
+    const result = initStore({
+      hash: "",
+      fallback: twoRouteTour,
+      urlSync: false,
+      watchHash: false,
+    });
+    expect(result.source).toBe("starter");
     expect(result.readOnly).toBe(false);
-    expect(tour.value).toEqual(saved);
+    expect(tour.value.id).toBe(twoRouteTour().id);
   });
 
-  it("prefers a URL tour over localStorage", () => {
-    saveTour(twoRouteTour(), TEST_KEY);
+  it("prefers a URL tour over the starter template", () => {
     const shared = bigTour(6, 1);
     const result = initStore({
       hash: buildHash(shared),
-      key: TEST_KEY,
-      autosave: false,
+      fallback: twoRouteTour,
+      urlSync: false,
+      watchHash: false,
     });
     expect(result.source).toBe("url");
     expect(result.readOnly).toBe(true);
@@ -453,56 +548,60 @@ describe("initStore load order", () => {
   it("opens an editable share link without the view flag", () => {
     const result = initStore({
       hash: `#t=${encodeTour(twoRouteTour())}`,
-      key: TEST_KEY,
-      autosave: false,
+      urlSync: false,
+      watchHash: false,
     });
     expect(result.source).toBe("url");
     expect(result.readOnly).toBe(false);
     expect(readOnly.value).toBe(false);
   });
 
-  it("falls back to localStorage when the share payload is corrupt", () => {
-    const saved = twoRouteTour();
-    saveTour(saved, TEST_KEY);
+  it("falls back to the starter when the share payload is corrupt", () => {
     const result = initStore({
       hash: "#view&t=!!!garbage!!!",
-      key: TEST_KEY,
-      autosave: false,
+      fallback: twoRouteTour,
+      urlSync: false,
+      watchHash: false,
     });
-    expect(result.source).toBe("storage");
+    expect(result.source).toBe("starter");
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(tour.value.id).toBe(saved.id);
+    expect(tour.value.id).toBe(twoRouteTour().id);
   });
 
-  it("falls back to a blank tour when storage is empty and junk", () => {
-    clearStoredTour(TEST_KEY);
-    localStorage.setItem(TEST_KEY, "{not json");
-    const result = initStore({ hash: "", key: TEST_KEY, autosave: false });
+  it("falls back to a blank tour when no fallback is supplied", () => {
+    const result = initStore({
+      hash: "",
+      urlSync: false,
+      watchHash: false,
+    });
     expect(result.source).toBe("new");
-    expect(result.errors.length).toBeGreaterThan(0);
     expect(stopCount.value).toBe(0);
   });
 
   it("reads window.location.hash when no hash is supplied", () => {
     const shared = twoRouteTour();
     window.location.hash = buildHash(shared);
-    const result = initStore({ key: TEST_KEY, autosave: false });
+    const result = initStore({ urlSync: false, watchHash: false });
     expect(result.source).toBe("url");
     expect(tour.value.id).toBe(shared.id);
-    window.location.hash = "";
   });
 
-  it("a reload after edits restores those edits", () => {
+  it("a reload after edits restores those edits from the URL", () => {
     vi.useFakeTimers();
-    initStore({ hash: "", key: TEST_KEY });
+    initStore({ hash: "", fallback: twoRouteTour, watchHash: false });
     setTourMeta({ title: "Work In Progress" });
-    addStop({ lat: 41.5, lng: -87.5, title: "Saved stop" });
+    addStop({ lat: 41.5, lng: -87.5, title: "Unsaved stop" });
     vi.advanceTimersByTime(1000);
     const beforeReload = serializeTour(tour.value);
+    expect(window.location.hash).not.toBe("");
 
-    resetStore(); // simulate a page reload
-    const result = initStore({ hash: "", key: TEST_KEY, autosave: false });
-    expect(result.source).toBe("storage");
+    resetStore(); // simulate a page reload: only the address bar survives
+    const result = initStore({
+      fallback: twoRouteTour,
+      urlSync: false,
+      watchHash: false,
+    });
+    expect(result.source).toBe("url");
     expect(serializeTour(tour.value)).toBe(beforeReload);
   });
 });
@@ -556,6 +655,45 @@ describe("hash watcher", () => {
     window.location.hash = buildHash(twoRouteTour());
     window.dispatchEvent(new HashChangeEvent("hashchange"));
     expect(tour.value.title).toBe("Working");
+  });
+
+  it("clearing the hash throws the work away and returns to the starter", () => {
+    initStore({ hash: "", fallback: twoRouteTour, urlSync: false });
+    addStop({ lat: 41.6, lng: -87.6, title: "Some work" });
+    expect(stopCount.value).toBe(6);
+
+    window.location.hash = ""; // the user empties the address bar
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+
+    expect(tour.value.id).toBe(twoRouteTour().id);
+    expect(serializeTour(tour.value)).toBe(serializeTour(twoRouteTour()));
+    expect(readOnly.value).toBe(false);
+  });
+
+  it("a hash with no tour payload also clears back to the starter", () => {
+    initStore({ hash: "", fallback: twoRouteTour, urlSync: false });
+    setTourMeta({ title: "Edited" });
+
+    window.location.hash = "#view";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+
+    expect(tour.value.title).toBe("Downtown Tour");
+  });
+
+  it("does not react to its own URL writes (no feedback loop)", () => {
+    vi.useFakeTimers();
+    initStore({ hash: "", fallback: twoRouteTour });
+    addStop({ lat: 41.7, lng: -87.7, title: "Mine" });
+    vi.advanceTimersByTime(1000);
+    const written = window.location.hash;
+    expect(written).not.toBe("");
+
+    // Some browsers/extensions re-fire hashchange after a replaceState; the
+    // echo guard must not let that reload (or reset) the tour under us.
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+
+    expect(lastStopTitle(tour.value)).toBe("Mine");
+    expect(window.location.hash).toBe(written);
   });
 });
 

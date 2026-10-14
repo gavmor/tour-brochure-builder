@@ -8,14 +8,7 @@
  */
 
 import { computed, signal } from "@preact/signals";
-import {
-  editCopy,
-  loadStoredTour,
-  readOnly,
-  type Tour,
-  totalStops,
-  tour,
-} from "./tour";
+import { editCopy, readOnly, syncUrlNow, type Tour } from "./tour";
 
 export type ViewMode = "editor" | "brochure";
 
@@ -41,62 +34,27 @@ export function showBrochure(): void {
 }
 
 /**
- * The tour sitting in localStorage, when it is a *different* tour with work in
- * it. That is the only case where "Edit a copy" would destroy something.
- */
-export function workingTourAtRisk(current: Tour = tour.peek()): Tour | null {
-  const stored = loadStoredTour();
-  if (!stored?.ok) return null;
-  if (stored.tour.id === current.id) return null;
-  if (totalStops(stored.tour) === 0) return null;
-  return stored.tour;
-}
-
-export function editCopyPrompt(stored: Tour): string {
-  const stops = totalStops(stored);
-  return (
-    `Editing a copy replaces the tour saved in this browser — ` +
-    `“${stored.title}”, ${stops} stop${stops === 1 ? "" : "s"}.\n\n` +
-    `Export it first if you want to keep it. Continue?`
-  );
-}
-
-/**
- * Drop the share payload from the address bar without reloading the tour.
- * `replaceState` does not fire `hashchange`, so the store's hash watcher stays
- * quiet — otherwise clearing the hash would immediately re-open the shared
- * tour read-only and undo the copy.
- */
-function clearShareHash(): void {
-  if (typeof window === "undefined" || !window.location.hash) return;
-  const { pathname, search } = window.location;
-  window.history.replaceState(null, "", `${pathname}${search}`);
-}
-
-/**
  * "Edit a copy" (SPEC D2 + §5 item 8): clone the viewed tour under a fresh id,
- * unlock editing and open the editor — asking first when that would overwrite
- * a different tour already saved in this browser.
+ * unlock editing and open the editor.
  *
- * Returns the copy, or null when the author backed out.
+ * No confirmation step any more, and nothing is at risk: the URL is the only
+ * place state lives (ADR 0002), so the one thing a copy could overwrite is the
+ * `#view&t=` link currently in the address bar — which the person doing the
+ * copying is looking at, can still press Back to, and in any case still holds
+ * wherever they were sent it. The old dialog guarded a localStorage slot that
+ * no longer exists, so SPEC §5 item 8 is answered: no, it does not.
+ *
+ * Returns the copy. The `Tour | null` result is kept so a future prompt can
+ * report a cancellation without churning the call sites.
  */
 export function editCopyFlow(
-  options: {
-    confirm?: (message: string) => boolean;
-    titleSuffix?: string;
-  } = {},
+  options: { titleSuffix?: string } = {},
 ): Tour | null {
-  const ask =
-    options.confirm ??
-    (typeof window === "undefined"
-      ? () => true
-      : (message: string) => window.confirm(message));
-
-  const atRisk = workingTourAtRisk();
-  if (atRisk && !ask(editCopyPrompt(atRisk))) return null;
-
   const copy = editCopy({ titleSuffix: options.titleSuffix ?? " (copy)" });
-  clearShareHash();
+  // Swap `#view&t=…` for the copy's editable `#t=…` immediately, rather than
+  // waiting out the URL writer's debounce, so the address bar is never
+  // momentarily pointing at the tour that is no longer on screen.
+  syncUrlNow();
   viewMode.value = "editor";
   return copy;
 }
