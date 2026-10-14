@@ -11,9 +11,8 @@ body {
   min-height: 100vh;
 }
 
-.app {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+/* The app is full-bleed: the editor manages its own layout, and the brochure
+   view will manage its own page geometry. */
+#app {
+  min-height: 100vh;
 }

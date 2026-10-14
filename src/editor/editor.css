@@ -1,0 +1,587 @@
+/* Editor chrome. Brochure/print styling lives with the brochure view. */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  height: 100dvh;
+  color: #22303c;
+  background: #f4f1ea;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.editor__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #ffffff;
+  border-bottom: 1px solid #ded7c9;
+}
+
+.editor__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1 1 24rem;
+  min-width: 16rem;
+}
+
+.editor__title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #f7f5f0;
+}
+
+.editor__meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.editor__meta-row input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.editor__tools {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.editor__banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: #fdf3d8;
+  border-bottom: 1px solid #e6d9ad;
+  font-size: 0.9rem;
+}
+
+.editor__banner--error {
+  background: #fdeaea;
+  border-bottom-color: #e8c2c2;
+}
+
+/* -------------------------------------------------------------------- body */
+
+.editor__body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.map-pane {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.map-pane__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.map-pane--adding .map-pane__canvas,
+.map-pane--adding .leaflet-grab,
+.map-pane--adding .leaflet-interactive {
+  cursor: crosshair;
+}
+
+.map-pane__hint {
+  position: absolute;
+  left: 50%;
+  bottom: 1.25rem;
+  transform: translateX(-50%);
+  z-index: 500; /* above Leaflet panes, below its controls' modals */
+  margin: 0;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(34, 48, 60, 0.92);
+  color: #fff;
+  font-size: 0.82rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+
+.map-pane__hint--shape {
+  bottom: 3.75rem;
+  background: rgba(30, 132, 73, 0.95);
+}
+
+.map-pane__hint kbd {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  font-family: inherit;
+}
+
+.editor__sidebar {
+  flex: 0 0 24rem;
+  max-width: 24rem;
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem 4rem;
+  background: #fbf8f1;
+  border-left: 1px solid #ded7c9;
+}
+
+/* ------------------------------------------------------------- map markers */
+
+.stop-marker {
+  background: none;
+  border: none;
+}
+
+.stop-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.stop-badge--muted {
+  opacity: 0.65;
+}
+
+.stop-badge--selected {
+  box-shadow:
+    0 0 0 3px #fff,
+    0 0 0 6px rgba(31, 58, 95, 0.85);
+  transform: scale(1.1);
+}
+
+.via-marker {
+  background: none;
+  border: none;
+}
+
+.via-handle {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: 0.125rem;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+}
+
+/* ----------------------------------------------------------- sidebar parts */
+
+.sidebar__heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0 0.5rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6b6459;
+}
+
+.sidebar__count {
+  font-weight: 400;
+  color: #8c8577;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sidebar__action {
+  margin-left: auto;
+}
+
+.route-panel,
+.itinerary,
+.stop-panel {
+  border-top: 1px solid #e7e0d3;
+}
+
+.route-panel:first-child {
+  border-top: none;
+}
+
+.swatches {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.6rem;
+}
+
+.swatch {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.swatch--on {
+  border-color: #22303c;
+}
+
+.route-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* --------------------------------------------------------------- itinerary */
+
+.route-section {
+  margin-bottom: 0.9rem;
+  border-left: 4px solid var(--route-color, #ccc);
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.route-section--active {
+  box-shadow: 0 0 0 2px rgba(34, 48, 60, 0.25);
+}
+
+.route-section__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid #efeade;
+}
+
+.route-section__select {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  background: none;
+  border: none;
+  padding: 0.15rem;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.route-section__name {
+  font-weight: 600;
+}
+
+.route-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.route-section__visibility {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: #6b6459;
+}
+
+.itinerary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  min-height: 1.5rem; /* keeps an empty route a valid drop target */
+}
+
+.itinerary-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 5px;
+  padding: 0.1rem 0.15rem;
+}
+
+.itinerary-row--selected {
+  background: #eef3f8;
+  outline: 2px solid #1f3a5f;
+}
+
+.itinerary-row--ghost {
+  opacity: 0.4;
+}
+
+.itinerary-row--chosen {
+  background: #e9f3ec;
+}
+
+.itinerary-row__grip {
+  cursor: grab;
+  color: #b4ab9c;
+  padding: 0 0.15rem;
+  user-select: none;
+}
+
+.itinerary-row__main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  padding: 0.3rem 0.1rem;
+  cursor: pointer;
+}
+
+.itinerary-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.itinerary-row__title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itinerary-row__blurb {
+  font-size: 0.76rem;
+  color: #746d60;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itinerary-row__actions {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.itinerary-row__actions button {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.itinerary-empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+  font-size: 0.82rem;
+  color: #746d60;
+}
+
+/* -------------------------------------------------------------- stop panel */
+
+.stop-panel {
+  padding-bottom: 1rem;
+}
+
+.stop-panel--empty {
+  font-size: 0.85rem;
+  color: #746d60;
+}
+
+.stop-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.stop-panel__header h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stop-panel__preview {
+  margin: 0 0 0.75rem;
+}
+
+.stop-panel__preview img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9; /* fixed box, so the panel never jumps on load */
+  object-fit: cover;
+  border-radius: 6px;
+  background: #eceade;
+}
+
+/* ------------------------------------------------------------------ fields */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+}
+
+.field__label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b6459;
+}
+
+.field__label em {
+  text-transform: none;
+  letter-spacing: 0;
+  font-style: normal;
+  color: #948c7d;
+}
+
+.field__error {
+  margin: -0.3rem 0 0.6rem;
+  font-size: 0.78rem;
+  color: #9c2c1f;
+}
+
+.field-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.field-row .field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.field--grow {
+  flex: 1 1 auto;
+}
+
+.field--color {
+  flex: 0 0 4.5rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.toggle em {
+  display: block;
+  font-style: normal;
+  color: #948c7d;
+  font-size: 0.74rem;
+}
+
+/* ----------------------------------------------------------------- controls */
+
+.editor input[type="text"],
+.editor input[type="url"],
+.editor input[type="number"],
+.editor textarea,
+.editor select {
+  font: inherit;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #d5cdbd;
+  border-radius: 5px;
+  background: #fff;
+  color: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.editor textarea {
+  resize: vertical;
+}
+
+.editor input[aria-invalid="true"] {
+  border-color: #c0392b;
+}
+
+.editor button {
+  font: inherit;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid #cfc7b7;
+  border-radius: 5px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.editor button:hover:not(:disabled) {
+  background: #f1ece1;
+}
+
+.editor button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.editor button.primary {
+  background: #1f3a5f;
+  border-color: #1f3a5f;
+  color: #fff;
+  font-weight: 600;
+}
+
+.editor button.primary--on {
+  background: #1e8449;
+  border-color: #1e8449;
+}
+
+.editor button.danger {
+  color: #9c2c1f;
+  border-color: #e0c3bd;
+}
+
+.editor button.danger:hover:not(:disabled) {
+  background: #fdeceb;
+}
+
+.editor :focus-visible {
+  outline: 2px solid #1f3a5f;
+  outline-offset: 1px;
+}
+
+/* ----------------------------------------------------------------- mobile */
+
+@media (max-width: 860px) {
+  .editor {
+    height: auto;
+  }
+
+  .editor__body {
+    flex-direction: column;
+  }
+
+  .map-pane {
+    flex: 0 0 60vh;
+    height: 60vh;
+  }
+
+  .editor__sidebar {
+    flex: 1 1 auto;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid #ded7c9;
+    overflow: visible;
+  }
+}

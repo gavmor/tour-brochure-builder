@@ -78,6 +78,53 @@ characters (SPEC §6). The store exposes `shareEncodedLength`, `shareUrlLength`
 and `shareUrlWarning` (`"ok" | "warn" | "too-long"`) so the UI can warn above
 6,000 instead of emitting a link that silently truncates.
 
+## Map editor (`src/editor/`)
+
+The editing surface: a Leaflet map beside an itinerary sidebar. Leaflet is
+driven directly through `useRef`/`useEffect` — react-leaflet needs the
+preact/compat alias and the direct API is a better fit anyway, since the store
+is the source of truth and the effects just reconcile layers against it, keyed
+by id (so typing in the title field does not tear down every marker).
+
+| File | What it holds |
+|------|---------------|
+| `Editor.tsx` | Shell: tour title/subtitle/tagline, Add-stop and Fit controls, read-only banner. |
+| `MapEditor.tsx` | The Leaflet map: tiles, markers, one polyline per route, shape handles, bounds fitting. |
+| `Itinerary.tsx` | Per-route stop lists: SortableJS drag-reorder, up/down buttons, delete. |
+| `StopPanel.tsx` | Edit panel for the selected stop: title, blurb, description, image URL + preview, coordinates, route. |
+| `RoutePanel.tsx` | Add / rename / recolor / delete a route and toggle shape points. |
+| `leafletSetup.ts` | OSM tile layer options and the Vite default-icon fix. |
+| `markers.ts` | Numbered badge `divIcon` and `safeColor` sanitising. |
+| `shape.ts` | Polyline vertices, weaving `Route.via` shape points into the right segment. |
+
+What an author can do:
+
+- **Add** — press *Add stop*, then click the map (it stays armed for several
+  stops; <kbd>Esc</kbd> disarms). With the map focused, <kbd>Enter</kbd> adds a
+  stop at the centre of the view.
+- **Move** — drag a marker, or type coordinates in the edit panel.
+- **Reorder** — drag an itinerary row by its grip, or use the ↑/↓ buttons
+  (the buttons exist so reordering is not mouse-only). Dragging a row onto
+  another route's list moves the stop between routes.
+- **Edit** — click a row or a marker; the two selections are two-way, and the
+  map pans to the stop while the row scrolls into view.
+- **Routes** — numbering restarts at 1 per route, each route draws its own
+  polyline in its own color, and the *Show* checkbox hides one from the map.
+- **Shape points** (SPEC D4) — v1 draws straight segments, with no routing
+  service. Turn on *Shape points* and <kbd>Shift</kbd>-click the active route's
+  line to drop a handle, drag it to bend the line, <kbd>Shift</kbd>-click it to
+  remove it. They are stored as `Route.via` and woven into the nearest segment,
+  so reordering stops re-flows them instead of scrambling the line.
+
+Image URLs are `https:`-only (SPEC D3) — a non-`https` value is reported and
+never written to the store. The preview is lazy, sent with
+`referrerpolicy="no-referrer"`, in a fixed 16:9 box, and collapses with an
+explanation if the image fails to load.
+
+The OSM attribution is part of the tile layer, so it is present wherever the
+map is: it is a licence term, not decoration. Tile `maxZoom` is 19 and nothing
+prefetches tiles.
+
 ## Deployment
 
 Pushes to `main` automatically deploy to GitHub Pages via the workflow in
@@ -108,6 +155,7 @@ serves the app shell for any route, enabling client-side routing.
 - [Vite](https://vite.dev/) — build tool
 - [Vitest](https://vitest.dev/) — tests
 - [Leaflet](https://leafletjs.com/) + OpenStreetMap — map rendering
+- [SortableJS](https://sortablejs.github.io/Sortable/) — itinerary drag-reorder
 - [zod](https://zod.dev/) — runtime validation
 - [lz-string](https://pieroxy.net/blog/pages/lz-string/index.html) — share-URL compression
 - [Biome](https://biomejs.dev/) — linting
