@@ -19,6 +19,7 @@ import {
   activeRouteId,
   addRoute,
   COLOR_SWATCHES,
+  colorName,
   DEFAULT_ROUTE_COLOR,
   DEFAULT_ROUTE_PROFILE,
   deleteRoute,
@@ -112,6 +113,7 @@ export function RoutePanel() {
         <div class="swatches">
           {COLOR_SWATCHES.map((preset) => {
             const on = preset.toLowerCase() === color.toLowerCase();
+            const name = colorName(preset);
             return (
               <button
                 key={preset}
@@ -120,8 +122,10 @@ export function RoutePanel() {
                 style={{ background: preset }}
                 aria-pressed={on}
                 disabled={locked}
-                aria-label={`Use ${preset}`}
-                title={preset}
+                // A swatch is a color, not a hex code: a screen reader should
+                // say "Use green", not spell out 1E8449 (QA-BUG-8).
+                aria-label={`Use ${name}`}
+                title={`${name} (${preset})`}
                 onClick={() => updateRoute(active.id, { color: preset })}
               >
                 {on ? (

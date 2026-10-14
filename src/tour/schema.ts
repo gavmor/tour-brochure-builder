@@ -86,7 +86,7 @@ export interface TourV1 {
 export const ROUTE_COLORS = [
   "#1E8449", // green
   "#C0392B", // red
-  "#1F3A5F", // navy / night
+  "#1F3A5F", // navy
   "#D68910", // amber
   "#7D3C98", // violet
   "#0C6E6D", // teal
@@ -95,6 +95,36 @@ export const ROUTE_COLORS = [
   "#8B5A2B", // brown
   "#37474F", // slate
 ] as const;
+
+/**
+ * What each palette entry is called out loud.
+ *
+ * The names used to live only in the comments above, so the swatch buttons
+ * labelled themselves `Use #1E8449` and a screen-reader user heard a hex
+ * string spelled out (QA-BUG-8). Keyed by lowercase hex so a stored color
+ * matches whatever case it was written in.
+ */
+export const ROUTE_COLOR_NAMES: Record<string, string> = {
+  "#1e8449": "green",
+  "#c0392b": "red",
+  "#1f3a5f": "navy",
+  "#d68910": "amber",
+  "#7d3c98": "violet",
+  "#0c6e6d": "teal",
+  "#2458a8": "blue",
+  "#a62a79": "magenta",
+  "#8b5a2b": "brown",
+  "#37474f": "slate",
+};
+
+/**
+ * A speakable name for a color: the palette name when it is a preset,
+ * otherwise "custom" — never a hex code read out digit by digit. The hex is
+ * still worth showing beside it, which is the caller's business.
+ */
+export function colorName(color: string): string {
+  return ROUTE_COLOR_NAMES[color.trim().toLowerCase()] ?? "custom";
+}
 
 /** Alias used by the color picker UI; the palette is the swatch set. */
 export const COLOR_SWATCHES = ROUTE_COLORS;

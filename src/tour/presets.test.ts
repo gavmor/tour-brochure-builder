@@ -8,16 +8,40 @@
 import { describe, expect, it } from "vitest";
 import {
   categoryMeta,
+  colorName,
   createRoute,
   createStop,
   createTour,
   DEFAULT_ROUTE_PROFILE,
   DEFAULT_STOP_CATEGORY,
+  ROUTE_COLORS,
   routeProfile,
   stopCategory,
 } from "./schema";
 import { decodeTour, encodeTour } from "./urlShare";
 import { parseTour, serializeTour } from "./validate";
+
+describe("colorName (§3b, QA-BUG-8)", () => {
+  it("names every palette entry", () => {
+    for (const color of ROUTE_COLORS) {
+      const name = colorName(color);
+      expect(name).not.toBe("custom");
+      expect(name).not.toMatch(/#|[0-9]/);
+    }
+    expect(new Set(ROUTE_COLORS.map(colorName)).size).toBe(ROUTE_COLORS.length);
+  });
+
+  it("matches a stored color whatever case it was written in", () => {
+    expect(colorName("#1e8449")).toBe("green");
+    expect(colorName("#1E8449")).toBe("green");
+    expect(colorName("  #1E8449 ")).toBe("green");
+  });
+
+  it("calls an off-palette color custom rather than inventing a name", () => {
+    expect(colorName("#FF00AA")).toBe("custom");
+    expect(colorName("")).toBe("custom");
+  });
+});
 
 describe("route profile (§3a)", () => {
   it("defaults to walking and is omitted when default", () => {
