@@ -55,6 +55,12 @@ export const selectedStopId = signal<string | null>(null);
 export const lastLoadNotice = signal<{
   warnings: string[];
   errors: string[];
+  /**
+   * Set when the errors above are survivable: the load failed and this is
+   * what was shown instead. Lets the editor say "showing the starter tour"
+   * rather than implying the app is broken (QA-BUG-2).
+   */
+  fallback?: "starter" | "new";
 } | null>(null);
 
 export const routes = computed<Route[]>(() => tour.value.routes);
@@ -392,7 +398,18 @@ export function editCopy(options: { titleSuffix?: string } = {}): Tour {
  */
 let fallbackFactory: (() => Tour | unknown) | null = null;
 
-let fallbackSnapshot: string | null = null;
+const fallbackSnapshot = signal<string | null>(null);
+
+/**
+ * True when there is a starter template to go back to and the working tour is
+ * no longer it — i.e. "Restore starter tour" would do something. Nothing in
+ * the app may be a one-way door (epic t_f3a98cf7), and "Start blank" was one
+ * until this existed (QA-BUG-5).
+ */
+export const canRestoreStarter = computed<boolean>(() => {
+  const snapshot = fallbackSnapshot.value;
+  return snapshot !== null && serializeTour(tour.value) !== snapshot;
+});
 
 /** The last hash this module wrote, so the watcher can ignore its own echo. */
 let lastWrittenHash: string | null = null;
@@ -404,8 +421,8 @@ let disposeUrlSync: (() => void) | null = null;
 /** The hash a given tour should occupy: empty while it still is the starter. */
 export function hashForTour(candidate: Tour): string {
   if (
-    fallbackSnapshot !== null &&
-    serializeTour(candidate) === fallbackSnapshot
+    fallbackSnapshot.value !== null &&
+    serializeTour(candidate) === fallbackSnapshot.value
   )
     return "";
   return buildHash(candidate, { view: false });
@@ -487,19 +504,34 @@ export function applyHash(hash: string): ParseResult | null {
 /**
  * Hydrate the starter template (or a blank tour when no fallback was injected,
  * or when the injected one is unusable). Returns where the tour came from.
+ *
+ * Any errors already on `result` — a corrupt `#t=` payload, typically — are
+ * republished to `lastLoadNotice` once the fallback is in place. `loadTour`
+ * below writes its own (clean) notice, and letting that stand is what made a
+ * broken share link fail silently: the user got the curated starter with no
+ * hint their link was unreadable (QA-BUG-2).
  */
 function hydrateFallback(result: InitResult): "starter" | "new" {
+  let source: "starter" | "new" = "new";
   if (fallbackFactory) {
     const seeded = loadTour(fallbackFactory());
     if (seeded.ok) {
       result.warnings = seeded.warnings;
-      return "starter";
+      source = "starter";
+    } else {
+      // A broken fallback must never strand the user on an empty app.
+      result.errors.push(...seeded.errors);
     }
-    // A broken fallback must never strand the user on an empty app.
-    result.errors.push(...seeded.errors);
   }
-  newTour();
-  return "new";
+  if (source === "new") newTour();
+  if (result.errors.length > 0) {
+    lastLoadNotice.value = {
+      warnings: result.warnings,
+      errors: result.errors,
+      fallback: source,
+    };
+  }
+  return source;
 }
 
 /**
@@ -572,10 +604,10 @@ export function initStore(
     options.hash === undefined ? readLocationHash() : parseHash(options.hash);
 
   fallbackFactory = options.fallback ?? null;
-  fallbackSnapshot = null;
+  fallbackSnapshot.value = null;
   if (fallbackFactory) {
     const baseline = parseTour(fallbackFactory());
-    if (baseline.ok) fallbackSnapshot = serializeTour(baseline.tour);
+    if (baseline.ok) fallbackSnapshot.value = serializeTour(baseline.tour);
   }
 
   const result: InitResult = {
@@ -613,7 +645,7 @@ export function resetStore(): void {
   stopUrlSync();
   stopHashWatcher();
   fallbackFactory = null;
-  fallbackSnapshot = null;
+  fallbackSnapshot.value = null;
   lastWrittenHash = null;
   batch(() => {
     tour.value = createTour();

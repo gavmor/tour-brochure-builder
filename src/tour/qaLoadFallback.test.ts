@@ -83,20 +83,34 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
   });
 
   /**
-   * QA-BUG-2 (task t_9f25df7e): the decode error reaches `InitResult` and
-   * stops there — the starter hydration overwrites `lastLoadNotice`, so the
-   * editor's error banner never renders and a broken link looks like an
-   * ordinary first visit. Pinned as observed behaviour; the `it.fails` below
-   * is the canary that flips when it is fixed.
+   * QA-BUG-2 (task t_9f25df7e): the decode error used to reach `InitResult`
+   * and stop there — the starter hydration overwrote `lastLoadNotice`, so the
+   * editor's error banner never rendered and a broken link looked like an
+   * ordinary first visit. The notice must survive the fallback.
    */
-  it("today: the starter hydration wipes the corrupt-link notice (QA-BUG-2)", () => {
+  it("publishes the corrupt-link error to lastLoadNotice (QA-BUG-2)", () => {
     boot({ hash: CORRUPT_HASH });
-    expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
+    const notice = lastLoadNotice.value;
+    expect(notice).not.toBeNull();
+    expect(notice?.errors.length).toBeGreaterThan(0);
+    // The editor keys its "showing the starter tour" copy off this.
+    expect(notice?.fallback).toBe("starter");
   });
 
-  it.fails("wanted: a corrupt share link should leave an error on lastLoadNotice (QA-BUG-2)", () => {
-    boot({ hash: CORRUPT_HASH });
-    expect(lastLoadNotice.value?.errors.length ?? 0).toBeGreaterThan(0);
+  it("says 'blank tour' when there was no starter to fall back to", () => {
+    initStore({
+      hash: CORRUPT_HASH,
+      urlSync: false,
+      watchHash: false,
+    });
+    expect(lastLoadNotice.value?.fallback).toBe("new");
+    expect(lastLoadNotice.value?.errors.length).toBeGreaterThan(0);
+  });
+
+  it("leaves no notice behind on an ordinary first load", () => {
+    boot();
+    expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
+    expect(lastLoadNotice.value?.fallback).toBeUndefined();
   });
 
   it("still leaves an editable tour when the starter template itself is broken", () => {
