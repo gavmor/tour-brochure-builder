@@ -19,6 +19,12 @@ export interface Stop {
   description?: string;
   /** Absolute `https:` URL. Hotlinked, never uploaded (SPEC D3). */
   imageUrl?: string;
+  /**
+   * Preset category (choice-first UX §3c). Omitted when it is the default
+   * (`poi`) so default tours stay byte-free in the share URL. Read through
+   * {@link stopCategory} so absence resolves to the default.
+   */
+  category?: StopCategory;
 }
 
 /** An ordered, named, colored sequence of stops. */
@@ -28,6 +34,12 @@ export interface Route {
   /** CSS color used for the polyline, markers and legend chip. */
   color: string;
   stops: Stop[];
+  /**
+   * Travel mode for the route (choice-first UX §3a). Omitted when it is the
+   * default (`walking`). Read through {@link routeProfile} so absence resolves
+   * to the default. Cosmetic for now; reserved for real routing later.
+   */
+  profile?: RouteProfile;
   /**
    * Optional shape points for the polyline (SPEC D4). v1 draws straight
    * segments; `via` is the manual fidelity escape hatch, no routing service.
@@ -64,8 +76,12 @@ export interface TourV1 {
 }
 
 /**
- * Default route palette (SPEC §4). Every entry was picked for >= 4.5:1
- * contrast against white badge text.
+ * Route color palette — 10 accessible swatches (choice-first UX §3b).
+ *
+ * The first five are the original base-app palette (kept so existing tours and
+ * tests keep their exact colors); the next five extend it to a 10-swatch
+ * choice-first palette. Every entry has >= 4.5:1 contrast against the white
+ * badge numeral and the swatches are mutually distinguishable.
  */
 export const ROUTE_COLORS = [
   "#1E8449", // green
@@ -73,9 +89,88 @@ export const ROUTE_COLORS = [
   "#1F3A5F", // navy / night
   "#D68910", // amber
   "#7D3C98", // violet
+  "#0C6E6D", // teal
+  "#2458A8", // blue
+  "#A62A79", // magenta
+  "#8B5A2B", // brown
+  "#37474F", // slate
 ] as const;
 
+/** Alias used by the color picker UI; the palette is the swatch set. */
+export const COLOR_SWATCHES = ROUTE_COLORS;
+
 export const DEFAULT_ROUTE_COLOR = ROUTE_COLORS[0];
+
+/** Travel modes offered as a segmented control (choice-first UX §3a). */
+export type RouteProfile = "walking" | "driving" | "cycling";
+
+export const ROUTE_PROFILES: {
+  id: RouteProfile;
+  label: string;
+  icon: string;
+}[] = [
+  { id: "walking", label: "Walking", icon: "🚶" },
+  { id: "driving", label: "Driving", icon: "🚗" },
+  { id: "cycling", label: "Cycling", icon: "🚲" },
+];
+
+export const DEFAULT_ROUTE_PROFILE: RouteProfile = "walking";
+
+export function isRouteProfile(v: unknown): v is RouteProfile {
+  return v === "walking" || v === "driving" || v === "cycling";
+}
+
+/** A route always has a profile; absence resolves to the default (§3a). */
+export function routeProfile(route: Pick<Route, "profile">): RouteProfile {
+  return isRouteProfile(route.profile) ? route.profile : DEFAULT_ROUTE_PROFILE;
+}
+
+/** Stop category preset list, each with its map/legend icon (choice-first UX §3c). */
+export type StopCategory =
+  | "attraction"
+  | "museum"
+  | "historic"
+  | "viewpoint"
+  | "food"
+  | "nature"
+  | "shop"
+  | "transit"
+  | "poi";
+
+export const STOP_CATEGORIES: {
+  id: StopCategory;
+  label: string;
+  icon: string;
+}[] = [
+  { id: "attraction", label: "Attraction", icon: "⭐" },
+  { id: "museum", label: "Museum", icon: "🏛️" },
+  { id: "historic", label: "Historic", icon: "🏰" },
+  { id: "viewpoint", label: "Viewpoint", icon: "🌄" },
+  { id: "food", label: "Food & drink", icon: "🍽️" },
+  { id: "nature", label: "Park / nature", icon: "🌳" },
+  { id: "shop", label: "Shop", icon: "🛍️" },
+  { id: "transit", label: "Transit", icon: "🚉" },
+  { id: "poi", label: "Point of interest", icon: "📍" },
+];
+
+export const DEFAULT_STOP_CATEGORY: StopCategory = "poi";
+
+export function isStopCategory(v: unknown): v is StopCategory {
+  return STOP_CATEGORIES.some((c) => c.id === v);
+}
+
+/** A stop always has a category; absence resolves to the default (§3c). */
+export function stopCategory(stop: Pick<Stop, "category">): StopCategory {
+  return isStopCategory(stop.category) ? stop.category : DEFAULT_STOP_CATEGORY;
+}
+
+/** Metadata (label + icon) for a stop's effective category. */
+export function categoryMeta(category: StopCategory) {
+  return (
+    STOP_CATEGORIES.find((c) => c.id === category) ??
+    STOP_CATEGORIES[STOP_CATEGORIES.length - 1]
+  );
+}
 
 /** Practical share-URL ceiling before proxies/chat clients truncate (SPEC §6). */
 export const SHARE_URL_MAX = 8000;
@@ -107,6 +202,11 @@ export function createStop(
       ? { description: init.description }
       : {}),
     ...(init.imageUrl !== undefined ? { imageUrl: init.imageUrl } : {}),
+    // Omit the category when it is the default (poi) so default tours stay
+    // byte-free in the share URL (§6).
+    ...(init.category !== undefined && init.category !== DEFAULT_STOP_CATEGORY
+      ? { category: init.category }
+      : {}),
   };
 }
 
@@ -116,6 +216,11 @@ export function createRoute(init: Partial<Route> = {}, index = 0): Route {
     name: init.name ?? `Route ${index + 1}`,
     color: init.color ?? ROUTE_COLORS[index % ROUTE_COLORS.length],
     stops: init.stops ? init.stops.map((s) => ({ ...s })) : [],
+    // Omit the profile when it is the default (walking) so default tours stay
+    // byte-free in the share URL (§6).
+    ...(init.profile !== undefined && init.profile !== DEFAULT_ROUTE_PROFILE
+      ? { profile: init.profile }
+      : {}),
     ...(init.via
       ? { via: init.via.map((p) => [p[0], p[1]] as [number, number]) }
       : {}),

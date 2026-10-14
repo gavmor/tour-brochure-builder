@@ -12,6 +12,10 @@
 import { z } from "zod";
 import {
   createRoute,
+  DEFAULT_ROUTE_PROFILE,
+  DEFAULT_STOP_CATEGORY,
+  isRouteProfile,
+  isStopCategory,
   newId,
   ROUTE_COLORS,
   type Route,
@@ -30,6 +34,19 @@ const stopSchema = z.object({
   blurb: z.string().optional(),
   description: z.string().optional(),
   imageUrl: z.string().optional(),
+  category: z
+    .enum([
+      "attraction",
+      "museum",
+      "historic",
+      "viewpoint",
+      "food",
+      "nature",
+      "shop",
+      "transit",
+      "poi",
+    ])
+    .optional(),
 });
 
 const routeSchema = z.object({
@@ -37,6 +54,7 @@ const routeSchema = z.object({
   name: z.string(),
   color: z.string().min(1),
   stops: z.array(stopSchema),
+  profile: z.enum(["walking", "driving", "cycling"]).optional(),
   via: z.array(z.tuple([z.number(), z.number()])).optional(),
 });
 
@@ -155,6 +173,17 @@ function repairStop(
       warn(`${where}: dropped a non-https image URL on "${stop.title}"`);
     }
   }
+  // Keep only a recognised, non-default category; anything else resolves to the
+  // default (poi) at read time, so it is simply omitted here (§3c, §6).
+  if (raw.category !== undefined && raw.category !== null) {
+    if (isStopCategory(raw.category)) {
+      if (raw.category !== DEFAULT_STOP_CATEGORY) stop.category = raw.category;
+    } else {
+      warn(
+        `${where}: dropped an unknown category "${String(raw.category)}" on "${stop.title}"`,
+      );
+    }
+  }
   return stop;
 }
 
@@ -216,6 +245,15 @@ function repairRoute(
     color: color ?? ROUTE_COLORS[index % ROUTE_COLORS.length],
     stops,
   };
+  // Keep only a recognised, non-default profile; anything else resolves to the
+  // default (walking) at read time, so it is simply omitted here (§3a, §6).
+  if (raw.profile !== undefined && raw.profile !== null) {
+    if (isRouteProfile(raw.profile)) {
+      if (raw.profile !== DEFAULT_ROUTE_PROFILE) route.profile = raw.profile;
+    } else {
+      warn(`${where}: dropped an unknown profile "${String(raw.profile)}"`);
+    }
+  }
   const via = repairVia(raw.via, warn, where);
   if (via) route.via = via;
   return route;

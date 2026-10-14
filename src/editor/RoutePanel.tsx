@@ -1,6 +1,13 @@
 /**
- * Route controls: pick the route being edited, rename it, recolor it, add or
- * delete one, and toggle the shape-point handles.
+ * Route controls: pick the route being edited, rename it, choose its travel
+ * profile and color from reversible presets, add or delete one, and toggle the
+ * shape-point handles.
+ *
+ * Choice-first UX (§3a/§3b): the travel profile is a segmented control and the
+ * color is a swatch palette — no free-text/hex entry in the primary UI. Both
+ * are reversible: the profile defaults to walking and the color has an explicit
+ * reset. A "Custom color" disclosure keeps an escape hatch without putting a
+ * raw input in the main flow.
  *
  * SPEC §5.7 left v1 multi-route editing as a scope call with "ship it" as the
  * recommendation — two routes and a legend are the whole point of the
@@ -11,9 +18,13 @@ import {
   activeRoute,
   activeRouteId,
   addRoute,
+  COLOR_SWATCHES,
+  DEFAULT_ROUTE_COLOR,
+  DEFAULT_ROUTE_PROFILE,
   deleteRoute,
-  ROUTE_COLORS,
+  ROUTE_PROFILES,
   readOnly,
+  routeProfile,
   tour,
   updateRoute,
 } from "../tour";
@@ -28,6 +39,12 @@ export function RoutePanel() {
 
   if (!active) return null;
   const color = safeColor(active.color);
+  const profile = routeProfile(active);
+  const isPreset = COLOR_SWATCHES.some(
+    (preset) => preset.toLowerCase() === color.toLowerCase(),
+  );
+  const isDefaultColor =
+    color.toLowerCase() === DEFAULT_ROUTE_COLOR.toLowerCase();
 
   return (
     <section class="route-panel" aria-label="Routes">
@@ -57,35 +74,98 @@ export function RoutePanel() {
             }
           />
         </label>
-        <label class="field field--color">
-          <span class="field__label">Color</span>
-          <input
-            type="color"
-            value={color}
-            disabled={locked}
-            onInput={(e) =>
-              updateRoute(active.id, {
-                color: (e.target as HTMLInputElement).value,
-              })
-            }
-          />
-        </label>
       </div>
 
-      <div class="swatches">
-        {ROUTE_COLORS.map((preset) => (
+      <fieldset class="field field--group">
+        <legend class="field__label">Getting around</legend>
+        <div class="segmented">
+          {ROUTE_PROFILES.map((option) => {
+            const on = option.id === profile;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                class={`segmented__option${on ? " segmented__option--on" : ""}`}
+                aria-pressed={on}
+                disabled={locked}
+                title={`${option.label} route`}
+                onClick={() =>
+                  updateRoute(active.id, {
+                    // The default (walking) is stored as absence (§6).
+                    profile:
+                      option.id === DEFAULT_ROUTE_PROFILE
+                        ? undefined
+                        : option.id,
+                  })
+                }
+              >
+                <span aria-hidden="true">{option.icon}</span>
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <fieldset class="field field--group">
+        <legend class="field__label">Route color</legend>
+        <div class="swatches">
+          {COLOR_SWATCHES.map((preset) => {
+            const on = preset.toLowerCase() === color.toLowerCase();
+            return (
+              <button
+                key={preset}
+                type="button"
+                class={`swatch${on ? " swatch--on" : ""}`}
+                style={{ background: preset }}
+                aria-pressed={on}
+                disabled={locked}
+                aria-label={`Use ${preset}`}
+                title={preset}
+                onClick={() => updateRoute(active.id, { color: preset })}
+              >
+                {on ? (
+                  <span class="swatch__check" aria-hidden="true">
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        <div class="swatches__controls">
           <button
-            key={preset}
             type="button"
-            class={`swatch${preset.toLowerCase() === color.toLowerCase() ? " swatch--on" : ""}`}
-            style={{ background: preset }}
-            disabled={locked}
-            aria-label={`Use ${preset}`}
-            title={preset}
-            onClick={() => updateRoute(active.id, { color: preset })}
-          />
-        ))}
-      </div>
+            class="link-button"
+            disabled={locked || isDefaultColor}
+            title="Reset to the default route color"
+            onClick={() =>
+              updateRoute(active.id, { color: DEFAULT_ROUTE_COLOR })
+            }
+          >
+            Reset color
+          </button>
+          <details class="disclosure">
+            <summary>Custom color…</summary>
+            <label class="field field--color">
+              <span class="field__label">
+                {isPreset ? "Pick any color" : `Custom: ${color}`}
+              </span>
+              <input
+                type="color"
+                value={color}
+                disabled={locked}
+                aria-label="Custom route color"
+                onInput={(e) =>
+                  updateRoute(active.id, {
+                    color: (e.target as HTMLInputElement).value,
+                  })
+                }
+              />
+            </label>
+          </details>
+        </div>
+      </fieldset>
 
       <div class="route-panel__actions">
         <label class="toggle">

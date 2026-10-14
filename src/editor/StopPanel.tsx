@@ -9,13 +9,17 @@
 
 import { useEffect, useState } from "preact/hooks";
 import {
+  categoryMeta,
+  DEFAULT_STOP_CATEGORY,
   deleteStop,
   findStop,
   isUsableImageUrl,
   moveStop,
   moveStopToRoute,
   readOnly,
+  STOP_CATEGORIES,
   selectedStopId,
+  stopCategory,
   tour,
   updateStop,
 } from "../tour";
@@ -54,6 +58,8 @@ export function StopPanel() {
 
   const { stop, route, index } = found;
   const color = safeColor(route.color);
+  const category = stopCategory(stop);
+  const categoryInfo = categoryMeta(category);
   const trimmedDraft = imageDraft.trim();
   const imageInvalid = trimmedDraft !== "" && !isUsableImageUrl(trimmedDraft);
 
@@ -79,6 +85,9 @@ export function StopPanel() {
         <span class="stop-badge" style={{ background: color }}>
           {index}
         </span>
+        <span class="stop-panel__category-icon" aria-hidden="true">
+          {categoryInfo.icon}
+        </span>
         <h2>{stop.title || "Untitled stop"}</h2>
         <button
           type="button"
@@ -101,6 +110,45 @@ export function StopPanel() {
           }
         />
       </label>
+
+      <div class="field">
+        <span class="field__label" id={`stop-category-${stop.id}`}>
+          Category <em>sets the icon</em>
+        </span>
+        <div class="field-row field-row--tight">
+          <select
+            class="field--grow"
+            value={category}
+            disabled={locked}
+            aria-labelledby={`stop-category-${stop.id}`}
+            onChange={(e) => {
+              const value = (e.target as HTMLSelectElement).value;
+              // The default (poi) is stored as absence, so clear instead of set.
+              updateStop(stop.id, {
+                category:
+                  value === DEFAULT_STOP_CATEGORY
+                    ? undefined
+                    : (value as (typeof STOP_CATEGORIES)[number]["id"]),
+              });
+            }}
+          >
+            {STOP_CATEGORIES.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.icon} {option.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            class="link-button"
+            disabled={locked || category === DEFAULT_STOP_CATEGORY}
+            title="Reset to the default category"
+            onClick={() => updateStop(stop.id, { category: undefined })}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
 
       <label class="field">
         <span class="field__label">
@@ -174,32 +222,39 @@ export function StopPanel() {
         </p>
       ) : null}
 
-      <div class="field-row">
-        <label class="field">
-          <span class="field__label">Latitude</span>
-          <input
-            type="number"
-            step="0.000001"
-            value={stop.lat}
-            disabled={locked}
-            onChange={(e) =>
-              onCoord("lat", (e.target as HTMLInputElement).value)
-            }
-          />
-        </label>
-        <label class="field">
-          <span class="field__label">Longitude</span>
-          <input
-            type="number"
-            step="0.000001"
-            value={stop.lng}
-            disabled={locked}
-            onChange={(e) =>
-              onCoord("lng", (e.target as HTMLInputElement).value)
-            }
-          />
-        </label>
-      </div>
+      <details class="disclosure stop-panel__advanced">
+        <summary>Advanced: exact coordinates</summary>
+        <p class="field__hint">
+          Drag the marker on the map to move this stop. These fields are for
+          fine positioning only.
+        </p>
+        <div class="field-row">
+          <label class="field">
+            <span class="field__label">Latitude</span>
+            <input
+              type="number"
+              step="0.000001"
+              value={stop.lat}
+              disabled={locked}
+              onChange={(e) =>
+                onCoord("lat", (e.target as HTMLInputElement).value)
+              }
+            />
+          </label>
+          <label class="field">
+            <span class="field__label">Longitude</span>
+            <input
+              type="number"
+              step="0.000001"
+              value={stop.lng}
+              disabled={locked}
+              onChange={(e) =>
+                onCoord("lng", (e.target as HTMLInputElement).value)
+              }
+            />
+          </label>
+        </div>
+      </details>
 
       {current.routes.length > 1 ? (
         <label class="field">
