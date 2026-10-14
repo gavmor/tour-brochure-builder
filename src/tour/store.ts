@@ -259,6 +259,12 @@ export function updateRoute(
     const route = draft.routes.find((r) => r.id === routeId);
     if (!route) return;
     Object.assign(route, patch);
+    // An explicit `undefined` clears the field (e.g. resetting the profile to
+    // its default), which keeps it out of the serialized tour / share URL.
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined)
+        delete (route as unknown as Record<string, unknown>)[key];
+    }
     found = true;
   });
   return found;

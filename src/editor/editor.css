@@ -206,10 +206,22 @@
   border: 2px solid transparent;
   padding: 0;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .swatch--on {
   border-color: #22303c;
+  box-shadow: 0 0 0 2px #fff inset;
+}
+
+.swatch__check {
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
 }
 
 .route-panel__actions {
@@ -558,4 +570,113 @@
     border-top: 1px solid #ded7c9;
     overflow: visible;
   }
+}
+
+/* --------------------------------------- choice-first preset controls (§3) */
+
+/* <fieldset> used purely for grouping semantics — strip its chrome. */
+.field--group {
+  margin: 0 0 0.6rem;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.field--group > legend {
+  padding: 0;
+}
+
+/* Segmented control (route travel profile, §3a). */
+.segmented {
+  display: flex;
+  margin: 0.25rem 0 0.4rem;
+  border: 1px solid #c9c0ac;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segmented__option {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.4rem;
+  background: #fff;
+  border: none;
+  border-right: 1px solid #e3dcca;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented__option:last-child {
+  border-right: none;
+}
+
+.segmented__option--on {
+  background: #1f3a5f;
+  color: #fff;
+  font-weight: 600;
+}
+
+.segmented__option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Swatch palette controls (§3b). */
+.swatches__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #1f3a5f;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  color: #9a927f;
+  text-decoration: none;
+  cursor: default;
+}
+
+.disclosure > summary {
+  cursor: pointer;
+  color: #1f3a5f;
+  font-size: 0.85rem;
+}
+
+.disclosure[open] > summary {
+  margin-bottom: 0.4rem;
+}
+
+.field-row--tight {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field__hint {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.8rem;
+  color: #6b6557;
+}
+
+/* Category icon (§3c). */
+.stop-panel__category-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.itinerary-row__category-icon {
+  margin-right: 0.3rem;
 }
