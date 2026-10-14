@@ -1,38 +1,43 @@
 /**
  * QA regression suite for the Choice-first UX epic (t_f3a98cf7), item 5:
  * the fallback path — the app must never end up empty or broken, whatever the
- * URL, localStorage or the starter template throw at it.
+ * URL or the starter template throw at it.
  *
  * Load order under test (see `initStore`):
- *   `#t=` share link  >  localStorage  >  curated starter template  >  blank.
+ *   `#t=` share link  >  curated starter template  >  blank.
  *
- * These tests pin the *observed* behaviour so a regression is loud:
+ * Originally written by QA task t_9f25df7e against the localStorage-era store.
+ * Re-based onto the single-store model (ADR 0002, PR #3): `persistence.ts` is
+ * gone and no code path reads or writes localStorage, so the three
+ * storage-shaped cases — junk in storage, the QA-BUG-4 "non-tour blob in
+ * storage beats the starter" pin and its `it.fails` canary — describe a layer
+ * that no longer exists and are dropped rather than rewritten. The guard that
+ * replaces them is the last test here: a stale key from an older build is
+ * ignored outright. (CI also fails the build on `localStorage` in src/.)
+ *
+ * The URL-shaped cases are the ones that still matter and are kept verbatim:
  * - a corrupt share link falls back to the curated starter rather than a blank
  *   or broken app, and the decode error is still reported on the InitResult.
  *   NOTE: as of this run the editor does NOT surface that error to the user
  *   (QA-BUG-2, filed from task t_9f25df7e) — the error reaching InitResult is
  *   what a future fix will hang the notice on, so it is asserted here.
- * - unreadable localStorage falls back the same way.
  * - a broken starter template still leaves an editable blank tour.
- *
- * Added by QA task t_9f25df7e.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { starterTour } from "../data/starterTour";
-import { clearStoredTour, STORAGE_KEY } from "./persistence";
 import { totalStops } from "./schema";
 import {
   deleteStop,
   initStore,
   reorderStops,
   resetStore,
-  stopAutosave,
+  stopHashWatcher,
+  stopUrlSync,
   tour,
   updateStop,
 } from "./store";
 
-const KEY = "tour-brochure-builder:qa-fallback";
 const CORRUPT_HASH = "#t=NOT-A-REAL-PAYLOAD-%%%";
 
 beforeEach(() => {
@@ -41,9 +46,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  stopAutosave();
-  clearStoredTour(KEY);
-  clearStoredTour(STORAGE_KEY);
+  stopUrlSync();
+  stopHashWatcher();
   localStorage.clear();
   resetStore();
 });
@@ -51,15 +55,14 @@ afterEach(() => {
 function boot(options: { hash?: string } = {}) {
   return initStore({
     hash: options.hash ?? "",
-    key: KEY,
-    autosave: false,
+    urlSync: false,
     watchHash: false,
     fallback: starterTour,
   });
 }
 
 describe("fallback path: the app is never empty (epic item 5)", () => {
-  it("falls back to the curated starter when there is no URL and no storage", () => {
+  it("falls back to the curated starter when there is no URL state", () => {
     const result = boot();
     expect(result.source).toBe("starter");
     expect(totalStops(tour.value)).toBe(6);
@@ -78,41 +81,10 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     expect(result.errors.join(" ")).toMatch(/corrupt|truncated|Empty/i);
   });
 
-  it("falls back to the curated starter when localStorage holds junk", () => {
-    localStorage.setItem(KEY, "{not json at all");
-    const result = boot();
-    expect(result.source).toBe("starter");
-    expect(totalStops(tour.value)).toBe(6);
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-
-  /**
-   * QA-BUG-4 (task t_9f25df7e): `parseTour` repairs *any* object into a valid
-   * empty tour, so a non-tour blob at the storage key beats the curated
-   * starter and the user lands on a blank app. Pinned as observed behaviour;
-   * the `it.fails` below is the canary that flips green→red when it is fixed.
-   */
-  it("today: a non-tour object in storage is repaired into an EMPTY tour (QA-BUG-4)", () => {
-    localStorage.setItem(KEY, JSON.stringify({ hello: "world" }));
-    const result = boot();
-    expect(result.source).toBe("storage");
-    expect(totalStops(tour.value)).toBe(0);
-    expect(result.warnings.length).toBeGreaterThan(0);
-    expect(tour.value.routes.length).toBeGreaterThan(0); // still editable
-  });
-
-  it.fails("wanted: a storage blob that repairs to zero stops should yield the curated starter (QA-BUG-4)", () => {
-    localStorage.setItem(KEY, JSON.stringify({ hello: "world" }));
-    const result = boot();
-    expect(result.source).toBe("starter");
-    expect(totalStops(tour.value)).toBe(6);
-  });
-
   it("still leaves an editable tour when the starter template itself is broken", () => {
     const result = initStore({
       hash: "",
-      key: KEY,
-      autosave: false,
+      urlSync: false,
       watchHash: false,
       fallback: () => ({ not: "a tour" }),
     });
@@ -132,6 +104,19 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     const second = boot();
     expect(second.source).toBe("starter");
     expect(second.errors).toEqual([]);
+  });
+
+  it("ignores a stale localStorage key left by an older build (ADR 0002)", () => {
+    // The pre-PR#3 autosave key. A returning visitor who still has it must get
+    // the curated starter, not a resurrected empty tour (the blank-map bug).
+    localStorage.setItem(
+      "tour-brochure-builder:tour",
+      JSON.stringify({ version: 2, id: "t", title: "Stale", routes: [] }),
+    );
+    const result = boot();
+    expect(result.source).toBe("starter");
+    expect(tour.value.title).toBe("Chicago Downtown Walking Tour");
+    expect(totalStops(tour.value)).toBe(6);
   });
 });
 

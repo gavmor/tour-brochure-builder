@@ -22,7 +22,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { starterTour } from "../data/starterTour";
 import { v1Tour } from "./fixtures";
-import { clearStoredTour } from "./persistence";
 import {
   cloneTour,
   DEFAULT_ROUTE_PROFILE,
@@ -41,21 +40,25 @@ import {
   resetStore,
   setTourMeta,
   shareLink,
-  stopAutosave,
+  stopHashWatcher,
+  stopUrlSync,
   tour,
   updateRoute,
   updateStop,
 } from "./store";
 import { buildHash, decodeTour, encodeTour, parseHash } from "./urlShare";
 
-const KEY = "tour-brochure-builder:qa-roundtrip";
-
-/** Boot the app the way `main.tsx` does, with no URL and nothing stored. */
+/**
+ * Boot the app the way `main.tsx` does, with no URL state.
+ *
+ * Re-based by task t_40ec912a onto the single-store model (ADR 0002, PR #3):
+ * `persistence.ts`/`clearStoredTour` are gone and `initStore` takes `urlSync`
+ * instead of `key`/`autosave`. The journey under test is unchanged.
+ */
 function firstLoad() {
   return initStore({
     hash: "",
-    key: KEY,
-    autosave: false,
+    urlSync: false,
     watchHash: false,
     fallback: starterTour,
   });
@@ -85,8 +88,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  stopAutosave();
-  clearStoredTour(KEY);
+  stopUrlSync();
+  stopHashWatcher();
   localStorage.clear();
   resetStore();
 });
@@ -122,13 +125,12 @@ describe("seeded -> edited -> share URL -> fresh load (epic item 7)", () => {
     const edited = editTheSeededTour();
     const hash = buildHash(edited, { view: true });
 
-    // A different browser: no localStorage, only the pasted URL.
+    // A different browser: only the pasted URL (the hash is the only store).
     resetStore();
     localStorage.clear();
     const boot = initStore({
       hash,
-      key: KEY,
-      autosave: false,
+      urlSync: false,
       watchHash: false,
       fallback: starterTour,
     });
