@@ -57,6 +57,7 @@ export const lastLoadNotice = signal<{
 } | null>(null);
 
 export const routes = computed<Route[]>(() => tour.value.routes);
+
 export const stopCount = computed<number>(() => totalStops(tour.value));
 
 export const activeRoute = computed<Route | undefined>(() => {
@@ -69,10 +70,13 @@ export const activeRoute = computed<Route | undefined>(() => {
 export const shareLink = computed<ShareLink>(() =>
   buildShareLink(tour.value, { view: true }),
 );
+
 export const shareUrlLength = computed<number>(() => shareLink.value.urlLength);
+
 export const shareEncodedLength = computed<number>(
   () => shareLink.value.encodedLength,
 );
+
 export const shareUrlWarning = computed<"ok" | "warn" | "too-long">(() => {
   const link = shareLink.value;
   if (link.tooLong) return "too-long";
@@ -258,6 +262,12 @@ export function updateRoute(
     const route = draft.routes.find((r) => r.id === routeId);
     if (!route) return;
     Object.assign(route, patch);
+    // An explicit `undefined` clears the field (e.g. resetting the profile to
+    // its default), which keeps it out of the serialized tour / share URL.
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined)
+        delete (route as unknown as Record<string, unknown>)[key];
+    }
     found = true;
   });
   return found;

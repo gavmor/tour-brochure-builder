@@ -12,6 +12,7 @@ import Sortable from "sortablejs";
 import {
   activeRoute,
   activeRouteId,
+  categoryMeta,
   deleteStop,
   moveStopToRoute,
   type Route,
@@ -19,6 +20,7 @@ import {
   reorderStops,
   selectedStopId,
   stopBlurb,
+  stopCategory,
   tour,
 } from "../tour";
 import { safeColor } from "./markers";
@@ -147,7 +149,15 @@ function RouteSection({ route }: { route: Route }) {
                   {index + 1}
                 </span>
                 <span class="itinerary-row__text">
-                  <span class="itinerary-row__title">{stop.title}</span>
+                  <span class="itinerary-row__title">
+                    <span
+                      class="itinerary-row__category-icon"
+                      aria-hidden="true"
+                    >
+                      {categoryMeta(stopCategory(stop)).icon}
+                    </span>
+                    {stop.title}
+                  </span>
                   <span class="itinerary-row__blurb">{stopBlurb(stop)}</span>
                 </span>
               </button>
