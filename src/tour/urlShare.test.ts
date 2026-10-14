@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { bigTour, twoRouteTour } from "./fixtures";
-import { createTour, SHARE_URL_MAX, SHARE_URL_WARN } from "./schema";
+import {
+  createRoute,
+  createTour,
+  SHARE_URL_MAX,
+  SHARE_URL_WARN,
+} from "./schema";
 import {
   buildHash,
   buildShareLink,
@@ -44,6 +49,55 @@ describe("encode/decode round-trip", () => {
   it("produces a payload with no hash delimiters", () => {
     const encoded = encodeTour(bigTour(20, 2));
     expect(encoded).not.toMatch(/[#&?/\s=]/);
+  });
+
+  it("round-trips mixed travel modes, and costs nothing for the default", () => {
+    // ADR 0001 case 4: geometry is never in the URL, only the profile, and
+    // only when it differs from `foot`.
+    const tour = twoRouteTour();
+    tour.routes[0] = createRoute({ ...tour.routes[0], profile: "driving" });
+    const result = decodeTour(encodeTour(tour));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(serializeTour(result.tour)).toBe(serializeTour(tour));
+    expect(result.tour.routes[0].profile).toBe("driving");
+    expect("profile" in result.tour.routes[1]).toBe(false);
+    expect(serializeTour(result.tour)).not.toContain('"profile":"foot"');
+  });
+
+  it("loads a share link written before profiles existed", () => {
+    // The payload an older build emitted: no `profile` key anywhere.
+    const legacy = twoRouteTour();
+    for (const route of legacy.routes) delete route.profile;
+    const result = decodeTour(encodeTour(legacy));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tour.routes.every((r) => r.profile === undefined)).toBe(true);
+  });
+
+  it("loads a hand-edited link with a nonsense profile rather than failing", () => {
+    const tour = twoRouteTour();
+    (tour.routes[0] as { profile?: string }).profile = "hovercraft";
+    const result = decodeTour(encodeTour(tour));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tour.routes[0].profile).toBeUndefined();
+    expect(result.warnings.join(" ")).toContain("hovercraft");
+  });
+
+  it("keeps a profiled tour inside the share-URL ceiling (ADR 0001)", () => {
+    // Option B's whole argument: intent is cheap, geometry is not. A profile
+    // on every route must not move the needle.
+    const plain = bigTour(20, 2);
+    const profiled = {
+      ...plain,
+      routes: plain.routes.map((route) =>
+        createRoute({ ...route, profile: "driving" }),
+      ),
+    };
+    const grown = encodeTour(profiled).length - encodeTour(plain).length;
+    expect(grown).toBeLessThan(60);
+    expect(buildShareLink(profiled, { baseUrl: BASE }).tooLong).toBe(false);
   });
 
   it("survives a client that percent-encodes the payload in transit", () => {

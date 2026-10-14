@@ -277,3 +277,96 @@ describe("isTour", () => {
     expect(isTour(null)).toBe(false);
   });
 });
+
+/**
+ * ADR 0001's four backward-compatibility cases. `profile` is additive inside
+ * schema v2, so every link ever shared — and every link an older deployed
+ * build emits — has to keep loading.
+ */
+describe("Route.profile (ADR 0001)", () => {
+  const base = {
+    version: 2,
+    id: "t",
+    title: "T",
+    routes: [{ id: "r1", name: "R", color: "#1E8449", stops: [] }],
+  };
+
+  function withProfile(profile: unknown) {
+    return {
+      ...base,
+      routes: [{ ...base.routes[0], profile }],
+    };
+  }
+
+  it("case 1: a v2 tour with no profile loads and behaves as foot", () => {
+    const result = ok(parseTour(base));
+    expect(result.warnings).toEqual([]);
+    expect("profile" in result.tour.routes[0]).toBe(false);
+    expect(result.tour.routes[0].profile ?? "foot").toBe("foot");
+  });
+
+  it("keeps a non-default profile", () => {
+    expect(ok(parseTour(withProfile("driving"))).tour.routes[0].profile).toBe(
+      "driving",
+    );
+    expect(ok(parseTour(withProfile("bike"))).tour.routes[0].profile).toBe(
+      "bike",
+    );
+  });
+
+  it("case 2: a junk profile warns and falls back, it never fails the parse", () => {
+    const result = ok(parseTour(withProfile("teleport")));
+    expect(result.tour.routes[0].profile).toBeUndefined();
+    expect(result.warnings.join(" ")).toContain("teleport");
+    expect(result.warnings.join(" ")).toContain("foot");
+  });
+
+  it("does not reject a profile of the wrong type either", () => {
+    expect(
+      ok(parseTour(withProfile(7))).tour.routes[0].profile,
+    ).toBeUndefined();
+    expect(ok(parseTour(withProfile(null))).warnings).toEqual([]);
+  });
+
+  it("case 3: a v1 flat-stops tour migrates and takes the default", () => {
+    const result = ok(parseTour(v1Tour()));
+    expect(result.migratedFrom).toBe(1);
+    expect("profile" in result.tour.routes[0]).toBe(false);
+  });
+
+  it("drops an explicit default so a parse matches the factory exactly", () => {
+    // `createRoute` omits `foot`; if repair kept it, a tour would serialize
+    // differently depending on where it came from.
+    const result = ok(parseTour(withProfile("foot")));
+    expect("profile" in result.tour.routes[0]).toBe(false);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("case 4: a mixed-profile tour round-trips byte-identically", () => {
+    const mixed = {
+      ...base,
+      routes: [
+        { ...base.routes[0], id: "r1", profile: "driving" },
+        { id: "r2", name: "R2", color: "#C0392B", stops: [], profile: "bike" },
+        { id: "r3", name: "R3", color: "#1F3A5F", stops: [] },
+      ],
+    };
+    const once = ok(parseTour(mixed)).tour;
+    const twice = ok(parseTourJson(serializeTour(once))).tour;
+    expect(serializeTour(twice)).toBe(serializeTour(once));
+    expect(once.routes.map((r) => r.profile)).toEqual([
+      "driving",
+      "bike",
+      undefined,
+    ]);
+    // Only the two non-default routes spend URL budget on a profile key.
+    expect(serializeTour(once).match(/"profile"/g)).toHaveLength(2);
+  });
+
+  it("keeps the schema version at 2 — an old build must not reject new links", () => {
+    expect(ok(parseTour(withProfile("driving"))).tour.version).toBe(
+      TOUR_SCHEMA_VERSION,
+    );
+    expect(TOUR_SCHEMA_VERSION).toBe(2);
+  });
+});

@@ -16,13 +16,26 @@ import {
   isRouteProfile,
   isStopCategory,
   newId,
+  normalizeProfile,
   ROUTE_COLORS,
+  ROUTE_PROFILES,
   type Route,
+  type RouteProfile,
   type Stop,
   TOUR_SCHEMA_VERSION,
   type Tour,
   type TourSettings,
 } from "./schema";
+
+/**
+ * Runtime validation, repair and migration for tour data arriving from
+ * untrusted places: a pasted share URL or an uploaded .json file.
+ *
+ * Policy: repair what is unambiguously repairable (missing ids, missing
+ * titles, a `version: 1` flat tour, a single bad stop in an otherwise good
+ * route) and report it as a warning; reject only what cannot be salvaged
+ * (not an object, unknown schema version, unparseable JSON).
+ */
 
 /** Strict shape of a canonical, already-repaired tour. */
 const stopSchema = z.object({
@@ -53,7 +66,10 @@ const routeSchema = z.object({
   name: z.string(),
   color: z.string().min(1),
   stops: z.array(stopSchema),
-  profile: z.enum(["walking", "driving", "cycling"]).optional(),
+  // Additive in v2 (ADR 0001): a tour without `profile` is still a valid v2
+  // tour, so `TOUR_SCHEMA_VERSION` does not move and old links keep loading.
+  // The enum is the routing layer's canonical id list, not a second copy.
+  profile: z.enum(ROUTE_PROFILES).optional(),
   via: z.array(z.tuple([z.number(), z.number()])).optional(),
 });
 
@@ -212,6 +228,48 @@ function repairVia(raw: unknown, warn: (m: string) => void, where: string) {
   return points.length ? points : undefined;
 }
 
+/**
+ * Travel mode, repaired in the same spirit as everything else here: a value
+ * we do not recognise warns and falls back to the default, it never fails the
+ * parse (ADR 0001 — a hand-edited URL must still render).
+ *
+ * Two values are *not* unrecognised, they are legacy: the choice-first build
+ * shipped `walking` and `cycling` while the profile was still cosmetic.
+ * `normalizeProfile` maps them to `foot` and `bike` silently, so every link
+ * that build emitted keeps its travel mode instead of being reset to walking.
+ *
+ * An explicit `"foot"` is dropped rather than kept, because `createRoute`
+ * omits the default: canonical output has to be the same whether a route came
+ * from the factory or from a parse, or share links stop round-tripping
+ * byte-identically.
+ */
+function repairProfile(
+  raw: unknown,
+  warn: (m: string) => void,
+  where: string,
+): RouteProfile | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const normalized = normalizeProfile(raw);
+  // `normalizeProfile` answers `foot` both for a real foot/walking value and
+  // for nonsense, so the warning is gated on the input being known wording.
+  if (!isRouteProfile(raw) && !isLegacyProfileName(raw)) {
+    warn(
+      `${where}: unknown routing profile "${String(raw)}"; used "${DEFAULT_ROUTE_PROFILE}"`,
+    );
+    return undefined;
+  }
+  return normalized === DEFAULT_ROUTE_PROFILE ? undefined : normalized;
+}
+
+/** Travel-mode wording from the pre-routing choice-first build (t_2c1641fe). */
+const LEGACY_PROFILE_NAMES = ["walking", "cycling", "walk", "car", "bicycle"];
+
+function isLegacyProfileName(raw: unknown): boolean {
+  return (
+    typeof raw === "string" && LEGACY_PROFILE_NAMES.includes(raw.toLowerCase())
+  );
+}
+
 function repairRoute(
   raw: unknown,
   index: number,
@@ -244,15 +302,11 @@ function repairRoute(
     color: color ?? ROUTE_COLORS[index % ROUTE_COLORS.length],
     stops,
   };
-  // Keep only a recognised, non-default profile; anything else resolves to the
-  // default (walking) at read time, so it is simply omitted here (§3a, §6).
-  if (raw.profile !== undefined && raw.profile !== null) {
-    if (isRouteProfile(raw.profile)) {
-      if (raw.profile !== DEFAULT_ROUTE_PROFILE) route.profile = raw.profile;
-    } else {
-      warn(`${where}: dropped an unknown profile "${String(raw.profile)}"`);
-    }
-  }
+  // Keep only a recognised, non-default profile; everything else — absent,
+  // legacy wording, nonsense — resolves to the default at read time, so it is
+  // simply omitted here (§3a, §6, ADR 0001).
+  const profile = repairProfile(raw.profile, warn, where);
+  if (profile) route.profile = profile;
   const via = repairVia(raw.via, warn, where);
   if (via) route.via = via;
   return route;

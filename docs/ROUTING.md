@@ -148,6 +148,43 @@ grain.
 - 8 s `AbortController` timeout per request.
 - Failures are never cached.
 
+## How the map views consume it
+
+The editor and the brochure do not call the service directly. Both go through
+`src/editor/routeGeometry.ts`, which owns the module-level service instance
+and publishes per-route state as a Preact signal:
+
+```ts
+import { routeGeometry, syncRouteGeometry } from "../editor/routeGeometry";
+
+useEffect(() => { syncRouteGeometry(tour); }, [tour]);   // reconcile requests
+
+const geo = routeGeometry.value[route.id];
+line.setLatLngs(geo?.coords ?? routeLatLngs(route));      // road, else straight
+line.setStyle({ dashArray: geo?.approximate ? APPROXIMATE_DASH : undefined });
+```
+
+What that layer adds on top of the service:
+
+- **The straight line is the placeholder *and* the fallback.** `coords` is
+  `null` until a road answer arrives and after any degrading failure, so a
+  route is never blank — it is straight, then routed, or straight and dashed.
+- **Requests are reconciled against the cache key**, so renaming, recoloring,
+  selecting a stop or editing a blurb costs nothing; adding, removing,
+  reordering or moving a stop, and changing the profile, re-request.
+- **A synchronous cache hit paints immediately**, so a reload or an
+  editor ⇄ brochure switch does not flash straight lines over geometry we
+  already have.
+- **One read site for `Route.profile`** — `routeProfile(route)` in
+  `src/tour/schema.ts`, which applies ADR 0001's "absent means foot" and
+  degrades anything unrecognised, including the `walking` / `cycling` wording
+  the pre-routing choice-first build stored.
+- **State is module-level**, not component state: the two views share it, and
+  switching between them re-fetches nothing.
+- `routesSettled({ timeout })` resolves once every outstanding request has
+  settled — the hook the print flow needs, since geometry is a second async
+  dependency alongside tiles.
+
 ## Tests
 
 `pnpm test` covers success, timeout, 429 + cooldown, HTTP errors, malformed
@@ -156,10 +193,28 @@ hit/eviction/mirror budget, profile aliasing, debounce coalescing,
 supersede-and-abort, cancellation and serialisation — all against a mocked
 `fetch`.
 
+`src/editor/routeGeometry.test.ts` covers the view layer's decisions, and
+`src/editor/MapEditor.test.tsx` renders real Leaflet in jsdom to check that a
+blocked endpoint yields colored dashed lines rather than blank ones.
+
+Nothing in the suite touches the network: `src/test/setup.ts` installs a
+routing service whose `fetch` throws, so a component test that merely mounts a
+map cannot reach the public endpoints.
+
 `src/routing/live.test.ts` hits the real endpoints (including a
 polyline-vs-GeoJSON cross-check) and is skipped unless `ROUTING_LIVE=1`, so CI
 never leans on a donated service:
 
 ```sh
 ROUTING_LIVE=1 pnpm vitest run src/routing/live.test.ts
+```
+
+`src/editor/routeGeometry.live.test.ts` is the same idea one layer up: it
+draws the actual reference tours against FOSSGIS and asserts every route comes
+back street-following. Measured 2026-10-14 — the six-stop Chicago starter walk
+returns **792** geometry vertices where a straight line has 6; the two-route
+fixture returns 424 and 124.
+
+```sh
+ROUTING_LIVE=1 pnpm vitest run src/editor/routeGeometry.live.test.ts
 ```

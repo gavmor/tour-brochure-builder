@@ -15,11 +15,16 @@
  */
 export type RouteProfile = "foot" | "bike" | "driving";
 
-export const ROUTE_PROFILES: readonly RouteProfile[] = [
+/**
+ * A `const` tuple, not a widened array (ADR 0001's snippet): `z.enum()` in
+ * `src/tour/validate.ts` needs the literal members to build the share-URL
+ * schema from this one list instead of redeclaring it.
+ */
+export const ROUTE_PROFILES = [
   "foot",
   "bike",
   "driving",
-];
+] as const satisfies readonly RouteProfile[];
 
 /** Walking tours are the common case; absent `Route.profile` means foot. */
 export const DEFAULT_ROUTE_PROFILE: RouteProfile = "foot";
