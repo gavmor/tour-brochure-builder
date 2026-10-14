@@ -411,8 +411,8 @@ export function saveNow(key = STORAGE_KEY): boolean {
 // ------------------------------------------------------------------ bootstrap
 
 export interface InitResult {
-  /** Where the tour came from. */
-  source: "url" | "storage" | "new";
+  /** Where the tour came from. `starter` is the curated template fallback. */
+  source: "url" | "storage" | "starter" | "new";
   readOnly: boolean;
   warnings: string[];
   errors: string[];
@@ -459,7 +459,13 @@ export function stopHashWatcher(): void {
 
 /**
  * Load order on startup: a `#t=` share link wins over localStorage, which
- * wins over a blank tour. A `#view` link opens read-only and does not autosave.
+ * wins over the `fallback` (the curated starter template), which wins over a
+ * blank tour. A `#view` link opens read-only and does not autosave.
+ *
+ * `fallback` keeps the generic tour layer free of any dependency on app content
+ * (`src/data`): the caller — `main.tsx` — injects the starter template. When no
+ * fallback is given, a first visit gets a blank editable tour, exactly as
+ * before, so nothing here changes for tests or embedders that omit it.
  */
 export function initStore(
   options: {
@@ -467,6 +473,8 @@ export function initStore(
     key?: string;
     autosave?: boolean;
     watchHash?: boolean;
+    /** Produces the tour to hydrate when there is no URL or stored tour. */
+    fallback?: () => Tour | unknown;
   } = {},
 ): InitResult {
   const key = options.key ?? STORAGE_KEY;
@@ -505,6 +513,19 @@ export function initStore(
     return finish();
   }
   if (stored && !stored.ok) result.errors.push(...stored.errors);
+
+  // No URL and no stored tour: hydrate the curated starter template, so a
+  // first visit opens a populated, fully-editable tour instead of a blank map.
+  if (options.fallback) {
+    const seeded = loadTour(options.fallback());
+    if (seeded.ok) {
+      result.source = "starter";
+      result.warnings = seeded.warnings;
+      return finish();
+    }
+    // A broken fallback must never strand the user on an empty app.
+    result.errors.push(...seeded.errors);
+  }
 
   newTour();
   return finish();

@@ -10,6 +10,7 @@ import { useEffect } from "preact/hooks";
 import { editCopyFlow, showBrochure } from "../appState";
 import {
   lastLoadNotice,
+  newTour,
   readOnly,
   setTourMeta,
   stopCount,
@@ -27,6 +28,27 @@ export function Editor() {
   const locked = readOnly.value;
   const armed = addMode.value;
   const notice = lastLoadNotice.value;
+  const hasStops = stopCount.value > 0;
+
+  // "Start blank": back out of the curated starter template (or any tour) into
+  // an empty editable tour. There is no undo, so confirm first (task
+  // t_d7de7a2a). `newTour()` goes through the normal store path, so autosave
+  // then persists the empty tour and a reload stays blank.
+  const startBlank = () => {
+    const ask =
+      typeof window === "undefined"
+        ? () => true
+        : (message: string) => window.confirm(message);
+    if (
+      hasStops &&
+      !ask(
+        "Clear all stops and start from a blank tour? " +
+          "This cannot be undone — copy the share link first if you want to keep this tour.",
+      )
+    )
+      return;
+    newTour();
+  };
 
   // Escape is the universal "stop what you are doing" key; without it, armed
   // add-mode is a trap for anyone who reached it by keyboard.
@@ -107,6 +129,14 @@ export function Editor() {
             title="Zoom the map to fit every stop"
           >
             Fit to stops
+          </button>
+          <button
+            type="button"
+            onClick={startBlank}
+            disabled={locked || !hasStops}
+            title="Clear every stop and start from a blank tour"
+          >
+            Start blank
           </button>
           {/* The view switch (SPEC §3). The brochure owns Print, Copy share
               link and the printed legend; this is the way in. */}
