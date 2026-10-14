@@ -18,7 +18,7 @@ provisional**. D2–D4 are recommended defaults Gavin has not ruled on and are m
 | D1 | Layout target | Three-column, US Letter **landscape** tri-fold. Map spans the left two columns; itinerary occupies the right column. Full detail in §2–§4. | **Confirmed** (Gavin's reference + comment) |
 | D2 | Static vs. live | Shared links open **read-only** in brochure view. A `Make a copy / Edit` action clones the tour into the editor under a new id. | PROVISIONAL |
 | D3 | Images | **URL-only.** No upload backend, no bundled assets. | PROVISIONAL |
-| D4 | Route lines | **Straight polylines** in v1, one per route, colored per route. Road-snapped routing (OSRM/GraphHopper) deferred. | PROVISIONAL |
+| D4 | Route lines | **Straight polylines** in v1, one per route, colored per route. Road-snapped routing (OSRM/GraphHopper) deferred. | **SUPERSEDED** by Gavin on t_d408c860 — routes must follow streets. Storage settled in [ADR 0001](adr/0001-route-geometry-storage.md): geometry is recomputed on load, never stored in the share URL. |
 | D5 | Data shape *(forced by D1)* | `Tour → Route[] → Stop[]`. Numbering restarts at 1 within each route. **Supersedes the flat `Tour.stops[]` in card t_f9d14b37.** | **Confirmed** (implied by Gavin's comment) |
 | D6 | Stop copy has two lengths | `Stop.blurb` (one line, itinerary) and `Stop.description` (paragraph, detail card). | PROVISIONAL |
 
@@ -83,6 +83,12 @@ lines will cut through blocks and across water. Two mitigations, in order of cos
    `route.geometry` so the brochure stays a static artifact and does not re-fetch on view.
    Both are rate-limited external services; neither should be a hard dependency of a
    GitHub Pages build.
+
+> **Superseded.** Gavin ruled on t_d408c860 that routes must follow streets, so (2) is now
+> v1 scope rather than "later". Its *caching* proposal did not survive measurement:
+> storing geometry in `route.geometry` costs 11,443 share-URL characters against an 8,000
+> ceiling. [ADR 0001](adr/0001-route-geometry-storage.md) replaces it with a per-route
+> `profile` field, recompute-on-load, and a session cache. `route.via` (1) is unchanged.
 
 ### D5 — Data shape (confirmed by implication)
 

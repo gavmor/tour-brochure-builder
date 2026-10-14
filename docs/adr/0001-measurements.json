@@ -1,0 +1,187 @@
+{
+  "generatedAt": "2026-10-14T23:08:55.201Z",
+  "source": "https://router.project-osrm.org (public demo server)",
+  "profileProbe": [
+    {
+      "host": "OSRM demo",
+      "profile": "foot",
+      "status": 200,
+      "code": "Ok",
+      "distanceM": 611,
+      "durationS": 138,
+      "weightName": "routability"
+    },
+    {
+      "host": "OSRM demo",
+      "profile": "bike",
+      "status": 200,
+      "code": "Ok",
+      "distanceM": 611,
+      "durationS": 138,
+      "weightName": "routability"
+    },
+    {
+      "host": "OSRM demo",
+      "profile": "driving",
+      "status": 200,
+      "code": "Ok",
+      "distanceM": 611,
+      "durationS": 138,
+      "weightName": "routability"
+    },
+    {
+      "host": "FOSSGIS",
+      "profile": "foot",
+      "status": 200,
+      "code": "Ok",
+      "distanceM": 1647,
+      "durationS": 1317,
+      "weightName": "routability"
+    },
+    {
+      "host": "FOSSGIS",
+      "profile": "bike",
+      "status": 200,
+      "code": "Ok",
+      "distanceM": 537,
+      "durationS": 241,
+      "weightName": "duration"
+    },
+    {
+      "host": "FOSSGIS",
+      "profile": "driving",
+      "status": 200,
+      "code": "Ok",
+      "distanceM": 611,
+      "durationS": 138,
+      "weightName": "routability"
+    }
+  ],
+  "budget": {
+    "warn": 6000,
+    "max": 8000,
+    "baseUrl": "https://www.gavmor.com/tour-brochure-builder/",
+    "hashPrefix": "#view&t="
+  },
+  "tour": {
+    "title": "Chicago Downtown Tour",
+    "routes": [
+      {
+        "name": "Green Route",
+        "profile": "driving",
+        "stops": 14,
+        "roadKm": 18.3,
+        "geometryPoints": 776,
+        "polyline5Chars": 1896,
+        "polyline6Chars": 2615,
+        "simplifiedPoints": 79,
+        "simplified5Chars": 279
+      },
+      {
+        "name": "Red Route",
+        "profile": "driving",
+        "stops": 12,
+        "roadKm": 14.6,
+        "geometryPoints": 736,
+        "polyline5Chars": 1779,
+        "polyline6Chars": 2529,
+        "simplifiedPoints": 67,
+        "simplified5Chars": 236
+      },
+      {
+        "name": "Night Tour",
+        "profile": "driving",
+        "stops": 10,
+        "roadKm": 18.5,
+        "geometryPoints": 757,
+        "polyline5Chars": 1873,
+        "polyline6Chars": 2610,
+        "simplifiedPoints": 73,
+        "simplified5Chars": 271
+      }
+    ],
+    "totalStops": 36
+  },
+  "rows": [
+    {
+      "label": "B  stops + profile (CHOSEN)",
+      "note": "geometry recomputed on load, cached in sessionStorage",
+      "jsonChars": 7696,
+      "encodedChars": 5142,
+      "urlChars": 5195,
+      "overWarn": false,
+      "overMax": false,
+      "pctOfMax": 64.9
+    },
+    {
+      "label": "   v2 baseline, no profile",
+      "note": "what today's build emits; the delta is the cost of the profile field",
+      "jsonChars": 7636,
+      "encodedChars": 5128,
+      "urlChars": 5181,
+      "overWarn": false,
+      "overMax": false,
+      "pctOfMax": 64.8
+    },
+    {
+      "label": "   B minus stop descriptions",
+      "note": "shows how much of the budget is author prose",
+      "jsonChars": 5533,
+      "encodedChars": 3564,
+      "urlChars": 3617,
+      "overWarn": false,
+      "overMax": false,
+      "pctOfMax": 45.2
+    },
+    {
+      "label": "   B coords + titles only",
+      "note": "irreducible floor: ids, coordinates, titles, route metadata",
+      "jsonChars": 3431,
+      "encodedChars": 2072,
+      "urlChars": 2125,
+      "overWarn": false,
+      "overMax": false,
+      "pctOfMax": 26.6
+    },
+    {
+      "label": "A  + polyline5 geometry, full",
+      "note": "OSRM overview=full, geometries=polyline",
+      "jsonChars": 13325,
+      "encodedChars": 11390,
+      "urlChars": 11443,
+      "overWarn": true,
+      "overMax": true,
+      "pctOfMax": 143
+    },
+    {
+      "label": "A  + polyline6 geometry, full",
+      "note": "higher precision, strictly larger",
+      "jsonChars": 15539,
+      "encodedChars": 14767,
+      "urlChars": 14820,
+      "overWarn": true,
+      "overMax": true,
+      "pctOfMax": 185.3
+    },
+    {
+      "label": "A- + polyline5 geometry, simplified",
+      "note": "OSRM overview=simplified — visibly coarser at city-block zoom",
+      "jsonChars": 8525,
+      "encodedChars": 6419,
+      "urlChars": 6472,
+      "overWarn": true,
+      "overMax": false,
+      "pctOfMax": 80.9
+    },
+    {
+      "label": "A  + raw GeoJSON coords (worst case)",
+      "note": "number arrays, 5 decimals — what a naive implementation stores",
+      "jsonChars": 54821,
+      "encodedChars": 21402,
+      "urlChars": 21455,
+      "overWarn": true,
+      "overMax": true,
+      "pctOfMax": 268.2
+    }
+  ]
+}

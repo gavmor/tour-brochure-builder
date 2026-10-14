@@ -44,7 +44,7 @@ console.log(tour.value.title, shareLink.value.url);
 
 ```jsonc
 Tour  { version: 2, id, title, subtitle?, tagline?, description?, routes: Route[], settings? }
-Route { id, name, color, stops: Stop[], via?: [number, number][] }
+Route { id, name, color, stops: Stop[], via?: [number, number][], profile?: "foot" | "bike" | "driving" }
 Stop  { id, lat, lng, title, blurb?, description?, imageUrl? }
 ```
 
@@ -52,6 +52,12 @@ Array order is itinerary order, and a stop's printed number is its index
 **within its route**, so numbering restarts at 1 for each route (SPEC D5).
 A `version: 1` tour (flat `stops[]`) is migrated by wrapping the list in one
 default route.
+
+`Route.profile` selects the road-routing profile and is **optional — absent
+means `"foot"`**, so share URLs made before it existed keep loading unchanged
+([ADR 0001](docs/adr/0001-route-geometry-storage.md)). Road geometry itself is
+never serialized: it is recomputed at view time and cached for the session,
+because storing it would be 143 % of the share-URL ceiling.
 
 Imported data is repaired where it can be (missing ids and titles are
 generated, unusable stops and non-`https:` image URLs are dropped, each with a
