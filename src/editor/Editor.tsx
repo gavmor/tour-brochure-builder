@@ -7,8 +7,8 @@
  */
 
 import { useEffect } from "preact/hooks";
+import { editCopyFlow, showBrochure } from "../appState";
 import {
-  editCopy,
   lastLoadNotice,
   readOnly,
   setTourMeta,
@@ -108,6 +108,15 @@ export function Editor() {
           >
             Fit to stops
           </button>
+          {/* The view switch (SPEC §3). The brochure owns Print, Copy share
+              link and the printed legend; this is the way in. */}
+          <button
+            type="button"
+            onClick={showBrochure}
+            title="See the printable brochure for this tour"
+          >
+            Brochure →
+          </button>
         </div>
       </header>
 
@@ -119,7 +128,7 @@ export function Editor() {
           </span>
           <button
             type="button"
-            onClick={() => editCopy({ titleSuffix: " (copy)" })}
+            onClick={() => editCopyFlow({ titleSuffix: " (copy)" })}
           >
             Edit a copy
           </button>

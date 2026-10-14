@@ -1,10 +1,12 @@
+import { activeView } from "./appState";
+import { Brochure } from "./brochure/Brochure";
 import { Editor } from "./editor/Editor";
 
 /**
- * The editor is the whole app for now. The brochure card (t_b8114d95) adds the
- * Editor ⇄ Brochure switch here — a `#view` share link should land straight in
- * the brochure, and the store's `readOnly` signal is the flag to branch on.
+ * Two views over one tour: the editor authors it, the brochure prints and
+ * shares it. `activeView` follows the author's choice, except that a
+ * `#view&t=` share link is read-only (SPEC D2) and always opens the brochure.
  */
 export function App() {
-  return <Editor />;
+  return activeView.value === "brochure" ? <Brochure /> : <Editor />;
 }

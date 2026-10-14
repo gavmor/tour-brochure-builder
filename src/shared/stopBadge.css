@@ -1,0 +1,37 @@
+/* The numbered stop badge — the one visual atom the editor and the brochure
+   share (SPEC §4). Map marker, itinerary row and detail-card header all use
+   it, so the three read as one system, and both views import this file rather
+   than depending on the other's stylesheet being loaded. The route color
+   arrives as an inline background from `safeColor()`. */
+
+.stop-marker {
+  background: none;
+  border: none;
+}
+
+.stop-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.stop-badge--muted {
+  opacity: 0.65;
+}
+
+.stop-badge--selected {
+  box-shadow:
+    0 0 0 3px #fff,
+    0 0 0 6px rgba(31, 58, 95, 0.85);
+  transform: scale(1.1);
+}

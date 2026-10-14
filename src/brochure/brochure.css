@@ -1,0 +1,1035 @@
+/* ===========================================================================
+   Brochure view — screen layout and the tri-fold print sheet (SPEC §2–§4).
+
+   Class naming: everything this view owns is prefixed `bro-` / `brochure__`.
+   That is not decoration — the editor's sidebar already owns `.itinerary-row`,
+   `.route-section` and friends in editor.css, and both stylesheets are in one
+   bundle, so an unprefixed name silently inherits editor chrome (it printed
+   ellipsised one-line blurbs on white cards before the rename). `.stop-badge`
+   in shared/stopBadge.css is the one class the two views share on purpose.
+
+   Geometry, once, as tokens: US Letter landscape, 0.35in margins, three equal
+   3.667in panels. The map spans panels 1–2 and the itinerary owns panel 3, so
+   the map column is (2 × 3.667in − 0.35in) = 6.983in of the 10.3in content box
+   and the itinerary column is the remaining 3.317in. Those two numbers are
+   what keep the fold lines off the text.
+   =========================================================================== */
+
+@import "../fonts/fonts.css";
+@import "../shared/stopBadge.css";
+
+.brochure {
+  --page-margin: 0.35in;
+  --content-w: 10.3in; /* 11in − 2 × margin */
+  /* 8.5in − 2 × margin. The staged preview is laid out at this nominal
+     height; the actual print uses `100vh`, i.e. the engine's real page box,
+     which can be a hair smaller. `SPILL_RESERVE_PX` (0.19in) absorbs the
+     difference, so a measurement taken on the preview still holds on paper. */
+  --content-h: 7.8in;
+  --map-w: 6.983in; /* panels 1–2, minus the left page margin */
+  --col-w: 3.317in; /* panel 3, minus the right page margin */
+  --fold-safe: 0.3in; /* > 0.2in of clearance from the fold at 7.333in */
+
+  --ink: #22303c;
+  --muted: #6b6257;
+  --cream: #fbf8f1;
+  --hairline: #e0d9cc;
+  --ribbon: #c0392b;
+  --paper: #ffffff;
+
+  --font-display: "Oswald", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body:
+    "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* ---------------------------------------------- itinerary column metrics
+
+     Every measurement that changes how many entries fit in panel 3 is a
+     switchable variable, declared once per context below. The print flow
+     measures the spill-over point on screen while the sheet is staged, so if
+     the staged pass and the real print disagreed about padding or type size
+     the measurement would be wrong and entries would fall off the page — that
+     is exactly the bug these pairs exist to prevent. */
+  --screen-itin-pad-y: 0.85rem;
+  --screen-itin-pad-x: 0.9rem;
+  --screen-itin-ribbon-size: 1.15rem;
+  --screen-itin-subtitle-size: 0.8rem;
+  --screen-itin-tagline-size: 0.82rem;
+  --screen-itin-intro-size: 0.78rem;
+  --screen-itin-route-size: 0.95rem;
+  --screen-itin-title-size: 0.83rem;
+  --screen-itin-blurb-size: 0.72rem;
+  --screen-itin-badge: 1.15rem;
+  --screen-itin-badge-size: 0.68rem;
+  --screen-itin-row-pad: 0.2rem;
+  --screen-itin-gap: 0.5rem;
+
+  --paper-itin-pad-y: 0.18in;
+  --paper-itin-pad-x: var(--fold-safe);
+  --paper-itin-ribbon-size: 15pt;
+  --paper-itin-subtitle-size: 8pt;
+  --paper-itin-tagline-size: 8.5pt;
+  --paper-itin-intro-size: 7.5pt;
+  --paper-itin-route-size: 10.5pt;
+  --paper-itin-title-size: 8.5pt;
+  --paper-itin-blurb-size: 7pt;
+  --paper-itin-badge: 0.16in;
+  --paper-itin-badge-size: 7pt;
+  --paper-itin-row-pad: 0.015in;
+  --paper-itin-gap: 0.07in;
+
+  /* Screen by default; the staging class and @media print switch the set. */
+  --itin-pad-y: var(--screen-itin-pad-y);
+  --itin-pad-x: var(--screen-itin-pad-x);
+  --itin-ribbon-size: var(--screen-itin-ribbon-size);
+  --itin-subtitle-size: var(--screen-itin-subtitle-size);
+  --itin-tagline-size: var(--screen-itin-tagline-size);
+  --itin-intro-size: var(--screen-itin-intro-size);
+  --itin-route-size: var(--screen-itin-route-size);
+  --itin-title-size: var(--screen-itin-title-size);
+  --itin-blurb-size: var(--screen-itin-blurb-size);
+  --itin-badge: var(--screen-itin-badge);
+  --itin-badge-size: var(--screen-itin-badge-size);
+  --itin-row-pad: var(--screen-itin-row-pad);
+  --itin-gap: var(--screen-itin-gap);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #e9e5dc;
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+/* The paper metric set. Listed twice — once for the staged on-screen preview,
+   once for the actual print — but the values live only in `--paper-*` above,
+   so the two can never drift apart. */
+.brochure--staging {
+  --itin-pad-y: var(--paper-itin-pad-y);
+  --itin-pad-x: var(--paper-itin-pad-x);
+  --itin-ribbon-size: var(--paper-itin-ribbon-size);
+  --itin-subtitle-size: var(--paper-itin-subtitle-size);
+  --itin-tagline-size: var(--paper-itin-tagline-size);
+  --itin-intro-size: var(--paper-itin-intro-size);
+  --itin-route-size: var(--paper-itin-route-size);
+  --itin-title-size: var(--paper-itin-title-size);
+  --itin-blurb-size: var(--paper-itin-blurb-size);
+  --itin-badge: var(--paper-itin-badge);
+  --itin-badge-size: var(--paper-itin-badge-size);
+  --itin-row-pad: var(--paper-itin-row-pad);
+  --itin-gap: var(--paper-itin-gap);
+}
+
+/* Panel geometry is stated in inches; padding must live inside those inches or
+   every panel would overflow the printable area by its own padding. */
+.brochure,
+.brochure *,
+.brochure *::before,
+.brochure *::after {
+  box-sizing: border-box;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ chrome */
+
+.brochure__chrome {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  background: var(--paper);
+  border-bottom: 1px solid #ded7c9;
+  position: sticky;
+  top: 0;
+  z-index: 1200; /* above Leaflet's controls (1000) */
+}
+
+.brochure__chrome-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.brochure__chrome-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brochure__chrome-sub {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.brochure__chrome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.brochure__chrome-actions button {
+  font: inherit;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid #cfc7b6;
+  background: #f7f5f0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.brochure__chrome-actions button:hover:not(:disabled) {
+  background: #efece4;
+}
+
+.brochure__chrome-actions button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.brochure__chrome-actions .primary {
+  background: var(--ribbon);
+  border-color: var(--ribbon);
+  color: #fff;
+}
+
+.brochure__chrome-actions .primary:hover:not(:disabled) {
+  background: #a93226;
+}
+
+.brochure__banner,
+.brochure__status {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #e6d9ad;
+  background: #fdf3d8;
+}
+
+.brochure__status--ok {
+  background: #e8f5ec;
+  border-bottom-color: #bfe0c9;
+}
+
+.brochure__status--warn {
+  background: #fdf3d8;
+  border-bottom-color: #e6d9ad;
+}
+
+.brochure__status--error {
+  background: #fdeaea;
+  border-bottom-color: #e8c2c2;
+}
+
+.brochure__manual-link {
+  display: block;
+  padding: 0.5rem 1rem;
+  background: var(--paper);
+}
+
+.brochure__manual-link input {
+  width: 100%;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #cfc7b6;
+  border-radius: 6px;
+}
+
+.brochure__staging-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  background: rgba(30, 32, 36, 0.72);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------------- sheet */
+
+.brochure__sheet {
+  --sheet-pad: 1rem;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: var(--sheet-pad);
+  /* Backgrounds (cream column, ribbon, badges) are the design, not decoration:
+     keep them when the browser would otherwise drop them to save ink. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.brochure__page {
+  background: var(--paper);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+/* Page 1: map (panels 1–2) beside the itinerary (panel 3). */
+.brochure__page--main {
+  display: grid;
+  grid-template-columns: minmax(0, 67.8%) minmax(0, 32.2%);
+  min-height: 0;
+}
+
+.brochure__map-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 24rem;
+  background: #dfe8ea;
+}
+
+.brochure-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 24rem;
+}
+
+/* ------------------------------------------------------------------ legend */
+
+.bro-legend {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 1.6rem; /* clear of Leaflet's attribution strip */
+  z-index: 900; /* above tiles/overlays (≤ 700), below controls (1000) */
+  max-width: 14rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.bro-legend__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.bro-legend__button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.12rem 0.1rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-family: var(--font-display);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bro-legend__button:hover {
+  background: #f2efe8;
+}
+
+.bro-legend__button--off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.bro-legend__dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.bro-legend__meta {
+  font-size: 0.65rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.bro-legend__note {
+  margin: 0.4rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: var(--muted);
+  font-family: var(--font-body);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* -------------------------------------------------------------- itinerary
+
+   Metrics come from the `--itin-*` set, which the staging class and @media
+   print both switch to the paper values; see the token block at the top. */
+
+.bro-itinerary {
+  min-width: 0;
+  padding: var(--itin-pad-y) var(--itin-pad-x);
+  background: var(--cream);
+  border-left: 1px solid var(--hairline);
+  overflow-y: auto;
+}
+
+.bro-ribbon {
+  margin: 0 calc(-0.4 * var(--itin-pad-x)) var(--itin-gap);
+  padding: calc(0.45 * var(--itin-gap)) 1.2rem;
+  background: var(--ribbon);
+  color: #fff;
+  text-align: center;
+  /* The reference's notched ribbon tails, in CSS rather than an image. */
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    calc(100% - 0.6rem) 50%,
+    100% 100%,
+    0 100%,
+    0.6rem 50%
+  );
+}
+
+.bro-ribbon__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--itin-ribbon-size);
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.bro-itinerary__subtitle {
+  margin: 0 0 0.2rem;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: var(--itin-subtitle-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.bro-itinerary__tagline {
+  margin: 0 0 var(--itin-gap);
+  text-align: center;
+  font-size: var(--itin-tagline-size);
+  line-height: 1.3;
+  color: var(--ribbon);
+}
+
+.bro-itinerary__intro {
+  margin: 0 0 var(--itin-gap);
+  font-size: var(--itin-intro-size);
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.bro-itinerary__empty {
+  margin: 1rem 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Spill-over (SPEC §5 item 6): what panel 3 cannot hold prints on its own
+   sheet instead of being clipped. The staging class mirrors the print rules,
+   because staging *is* the print preview. */
+.bro-itinerary__continued {
+  margin: 0.35rem 0 0;
+  font-size: var(--itin-blurb-size);
+  font-style: italic;
+  color: var(--muted);
+}
+
+.bro-spill {
+  display: none;
+}
+
+/* The brochure's own OSM credit: hidden on screen (Leaflet's control carries
+   it there), shown on paper, where Leaflet's control is not reliably printed —
+   Firefox drops it. Either way the credit is on the page, which is what the
+   tile licence requires (SPEC §6). */
+.brochure__attribution {
+  display: none;
+  margin: 0;
+}
+
+.brochure--staging .brochure__attribution {
+  display: block;
+  /* In normal flow, as the map panel's last grid row — Firefox pushed an
+     absolutely-positioned credit onto the next page. */
+  text-align: right;
+  padding: 0.02in 0.06in;
+  background: #fff;
+  color: #222;
+  font-size: 6.5pt;
+  line-height: 1.4;
+}
+
+.brochure--staging .brochure__map-panel {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.brochure--staging .brochure__attribution a {
+  color: #222;
+  text-decoration: none;
+}
+
+.brochure--staging .bro-route__stop--spilled,
+.brochure--staging .bro-route--spilled {
+  display: none;
+}
+
+.brochure--staging .bro-spill {
+  display: block;
+}
+
+.bro-route + .bro-route {
+  margin-top: var(--itin-gap);
+  padding-top: var(--itin-gap);
+  border-top: 1px solid var(--hairline);
+}
+
+.bro-route__name {
+  margin: 0 0 calc(0.6 * var(--itin-gap));
+  font-family: var(--font-display);
+  font-size: var(--itin-route-size);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bro-route__stops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bro-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--itin-row-pad) 0.15rem;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.bro-row:hover {
+  background: #f3ece0;
+}
+
+.bro-row--selected {
+  background: #f0e4cf;
+  box-shadow: inset 0 0 0 1px #d9c8a6;
+}
+
+.bro-row .stop-badge {
+  width: var(--itin-badge);
+  height: var(--itin-badge);
+  font-size: var(--itin-badge-size);
+  margin-top: 0.08rem;
+  box-shadow: none;
+  flex: none;
+}
+
+.bro-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bro-row__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--itin-title-size);
+  line-height: 1.25;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bro-row__blurb {
+  font-size: var(--itin-blurb-size);
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------- stop cards */
+
+.bro-cards {
+  padding: 1.1rem 1.2rem 1.4rem;
+  background: var(--paper);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+.bro-cards__heading {
+  margin: 0 0 0.8rem;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.bro-cards__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.9rem;
+}
+
+.bro-card {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem 0.75rem;
+  background: var(--paper);
+}
+
+.bro-card--selected {
+  box-shadow: 0 0 0 2px #d9c8a6;
+}
+
+.bro-card__header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 0.45rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+}
+
+.bro-card__header .stop-badge {
+  grid-row: 1 / span 2;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.78rem;
+  box-shadow: none;
+}
+
+.bro-card__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bro-card__route {
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.bro-card__figure {
+  margin: 0 0 0.5rem;
+  /* A fixed box so the column does not reflow as hotlinked images arrive. */
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #ece7dd;
+}
+
+.bro-card__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.bro-card__description {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------- responsive (SPEC §3) */
+
+/* Desktop: map beside the list, map sticky so the itinerary scrolls alone. */
+@media screen and (min-width: 1024px) {
+  .brochure__page--main {
+    height: calc(100vh - 7rem);
+    max-height: 56rem;
+  }
+
+  .bro-itinerary {
+    height: 100%;
+  }
+}
+
+/* Tablet: same two columns, shorter map, more room for the list. */
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .brochure__page--main {
+    grid-template-columns: minmax(0, 55%) minmax(0, 45%);
+    height: auto;
+  }
+
+  .brochure__map-panel,
+  .brochure-map {
+    min-height: 22rem;
+  }
+}
+
+/* Mobile: stacked — map, then legend, then the itinerary (SPEC §3). */
+@media screen and (max-width: 767px) {
+  .brochure__sheet {
+    --sheet-pad: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .brochure__page--main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .brochure__map-panel,
+  .brochure-map {
+    min-height: 60vh;
+  }
+
+  /* SPEC §3's mobile wireframe: the legend becomes a row of chips under the
+     map rather than a box floating over it, where it would cover the map on a
+     small screen. */
+  .bro-legend {
+    position: static;
+    max-width: none;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    box-shadow: none;
+    background: var(--paper);
+  }
+
+  .bro-legend__list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.1rem 0.9rem;
+  }
+
+  .bro-itinerary {
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+  }
+
+  .bro-cards__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* =========================================================================
+   Print geometry.
+
+   `.brochure--staging` applies the paper layout *on screen* first: the Print
+   button needs Leaflet to request tiles for exactly the box that will be
+   printed, which it only does once the container has that size (SPEC §6 —
+   otherwise the map prints half-grey). The @media print block then repeats
+   the same geometry for the actual print.
+   ========================================================================= */
+
+.brochure--staging .brochure__sheet {
+  width: var(--content-w);
+  padding: 0;
+  gap: 0;
+}
+
+.brochure--staging .brochure__page--main,
+.brochure--staging .brochure__map-panel,
+.brochure--staging .bro-itinerary {
+  height: var(--content-h);
+  max-height: none;
+  min-height: 0;
+}
+
+/* The map fills what the credit row leaves of the panel — in staging exactly
+   as in print, so Leaflet measures the box it will actually be printed at. */
+.brochure--staging .brochure-map {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Clip like the paper does, so the staged preview shows exactly what the
+   print will: the column keeps what fits, the rest is on the spill sheet. */
+.brochure--staging .bro-itinerary {
+  overflow: hidden;
+  border-left: 0;
+}
+
+.brochure--staging .brochure__page--main {
+  grid-template-columns: var(--map-w) var(--col-w);
+}
+
+@media print {
+  @page {
+    size: letter landscape;
+    margin: 0.35in;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 0;
+    background: #fff;
+  }
+
+  .no-print,
+  .brochure__chrome,
+  .brochure__banner,
+  .brochure__status,
+  .brochure__manual-link,
+  .brochure__staging-overlay,
+  .leaflet-control-zoom,
+  .leaflet-control-container .leaflet-top {
+    /* biome-ignore lint/complexity/noImportantStyles: beats Leaflet's own
+       control styles, whose load order relative to this file is a bundler
+       detail; screen chrome must never reach the paper. */
+    display: none !important;
+  }
+
+  .brochure {
+    display: block;
+    min-height: 0;
+    background: #fff;
+    font-size: 10pt;
+
+    /* The paper metric set — same `--paper-*` values the staging preview uses,
+       so the measured spill-over point matches what actually prints. */
+    --itin-pad-y: var(--paper-itin-pad-y);
+    --itin-pad-x: var(--paper-itin-pad-x);
+    --itin-ribbon-size: var(--paper-itin-ribbon-size);
+    --itin-subtitle-size: var(--paper-itin-subtitle-size);
+    --itin-tagline-size: var(--paper-itin-tagline-size);
+    --itin-intro-size: var(--paper-itin-intro-size);
+    --itin-route-size: var(--paper-itin-route-size);
+    --itin-title-size: var(--paper-itin-title-size);
+    --itin-blurb-size: var(--paper-itin-blurb-size);
+    --itin-badge: var(--paper-itin-badge);
+    --itin-badge-size: var(--paper-itin-badge-size);
+    --itin-row-pad: var(--paper-itin-row-pad);
+    --itin-gap: var(--paper-itin-gap);
+  }
+
+  .brochure__sheet {
+    width: auto;
+    padding: 0;
+    gap: 0;
+  }
+
+  .brochure__page {
+    box-shadow: none;
+  }
+
+  /* Page 1: the tri-fold sheet. Heights are the nominal page box in inches,
+     the same values the staged preview uses, so what Leaflet measured while
+     staging is exactly what gets printed. */
+  .brochure__page--main {
+    display: grid;
+    grid-template-columns: var(--map-w) var(--col-w);
+    height: var(--content-h);
+    max-height: none;
+    break-inside: avoid;
+  }
+
+  .brochure__map-panel {
+    height: var(--content-h);
+    min-height: 0;
+    break-inside: avoid;
+    /* The credit rides as the last row, in flow: Firefox moved an absolutely
+       positioned one to the following page. */
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .brochure-map {
+    height: 100%;
+    min-height: 0;
+    break-inside: avoid;
+  }
+
+  /* The fold at 7.333in lands on the itinerary's left edge; the padding comes
+     from `--paper-itin-pad-x` (= `--fold-safe`), which keeps text more than
+     0.2in clear of it (SPEC §2). Anything that still does not fit has already
+     been moved to the continuation sheet by the spill measurement. */
+  .bro-itinerary {
+    height: var(--content-h);
+    overflow: hidden;
+    border-left: 0;
+  }
+
+  .bro-route__stops li {
+    break-inside: avoid;
+  }
+
+  .bro-row {
+    /* biome-ignore lint/complexity/noImportantStyles: the row is a button on
+       screen; its hover/selected treatment must not print as a grey box. */
+    background: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: same — selection chrome
+       is a screen affordance, not part of the brochure. */
+    box-shadow: none !important;
+  }
+
+  .bro-row__blurb {
+    /* no print-only metrics here: any divergence from the staged preview
+       would invalidate the spill measurement taken against it. */
+    orphans: 2;
+    widows: 2;
+  }
+
+  /* The legend prints as a static key, not a control. */
+  .bro-legend {
+    position: absolute;
+    left: 0.14in;
+    bottom: 0.22in;
+    max-width: 2.4in;
+    background: #fff;
+    box-shadow: none;
+    border: 1px solid var(--hairline);
+  }
+
+  .bro-legend__button {
+    cursor: default;
+    font-size: 8pt;
+  }
+
+  .bro-legend__button--off {
+    /* A route hidden on screen still prints; the key must not deny it. */
+    opacity: 1;
+    text-decoration: none;
+  }
+
+  /* OSM attribution is a licence term, not decoration: it must survive the
+     print (SPEC §6). Leaflet's own control is unreliable on paper — Firefox
+     drops it — so the brochure prints its own copy and Leaflet's is hidden,
+     which also stops the credit appearing twice in engines that do print it. */
+  .leaflet-control-attribution {
+    /* biome-ignore lint/complexity/noImportantStyles: beats Leaflet's own rule. */
+    display: none !important;
+  }
+
+  .brochure__attribution {
+    display: block;
+    text-align: right;
+    padding: 0.02in 0.06in;
+    background: #fff;
+    color: #222;
+    font-size: 6.5pt;
+    line-height: 1.4;
+  }
+
+  .brochure__attribution a {
+    color: #222;
+    text-decoration: none;
+  }
+
+  /* Continuation pages: stop detail cards, three balanced columns. */
+  .bro-cards {
+    break-before: page;
+    padding: 0;
+    box-shadow: none;
+    column-count: 3;
+    column-gap: 0.3in;
+    /* `balance`, not `auto`: a short tour's handful of cards should spread
+       across the three columns instead of stacking in the first one and
+       leaving two-thirds of the sheet blank. */
+    column-fill: balance;
+  }
+
+  /* The itinerary's spilled tail, on its own sheet ahead of the cards. */
+  .bro-route__stop--spilled,
+  .bro-route--spilled {
+    display: none;
+  }
+
+  .bro-spill {
+    display: block;
+    break-before: page;
+    column-count: 3;
+    column-gap: 0.3in;
+    column-fill: balance;
+  }
+
+  .bro-spill .bro-route {
+    /* Rows may flow across the three columns; a single row may not be split
+       (`.bro-route__stops li` above), so a badge never leaves its blurb. */
+    break-inside: auto;
+  }
+
+  .bro-cards__heading {
+    column-span: all;
+    font-size: 10pt;
+    margin-bottom: 0.14in;
+    padding-bottom: 0.04in;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .bro-cards__grid {
+    display: block;
+  }
+
+  .bro-card {
+    break-inside: avoid;
+    page-break-inside: avoid; /* legacy spelling, for older print engines */
+    margin: 0 0 0.16in;
+    border-radius: 4px;
+    padding: 0.08in 0.1in 0.1in;
+  }
+
+  .bro-card--selected {
+    box-shadow: none;
+  }
+
+  .bro-card__header .stop-badge {
+    width: 0.2in;
+    height: 0.2in;
+    font-size: 8pt;
+  }
+
+  .bro-card__title {
+    font-size: 9.5pt;
+  }
+
+  .bro-card__route {
+    font-size: 7pt;
+  }
+
+  .bro-card__description {
+    font-size: 8pt;
+    line-height: 1.35;
+  }
+
+  .bro-card__figure {
+    margin-bottom: 0.07in;
+  }
+}
