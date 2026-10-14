@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearStoredTour, saveTour } from "../tour/persistence";
 import { totalStops } from "../tour/schema";
 import {
   addStop,
@@ -7,12 +6,13 @@ import {
   initStore,
   reorderStops,
   resetStore,
-  stopAutosave,
   stopCount,
+  stopHashWatcher,
+  stopUrlSync,
   tour,
   updateStop,
 } from "../tour/store";
-import { buildHash, decodeTour, encodeTour } from "../tour/urlShare";
+import { buildHash, decodeTour, encodeTour, parseHash } from "../tour/urlShare";
 import {
   isTour,
   parseTour,
@@ -21,17 +21,16 @@ import {
 } from "../tour/validate";
 import { STARTER_TOUR_ID, starterTour } from "./starterTour";
 
-const TEST_KEY = "tour-brochure-builder:starter-test";
-
 beforeEach(() => {
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 afterEach(() => {
-  stopAutosave();
+  stopUrlSync();
+  stopHashWatcher();
+  window.location.hash = "";
   vi.useRealTimers();
-  localStorage.clear();
 });
 
 describe("starterTour template", () => {
@@ -117,8 +116,8 @@ describe("starterTour is a fully-editable, ordinary tour", () => {
   beforeEach(() => {
     initStore({
       hash: "",
-      key: TEST_KEY,
-      autosave: false,
+      urlSync: false,
+      watchHash: false,
       fallback: starterTour,
     });
   });
@@ -151,12 +150,11 @@ describe("starterTour is a fully-editable, ordinary tour", () => {
 });
 
 describe("initStore hydrates the starter template", () => {
-  it("opens the starter tour on a first visit (no URL, no storage)", () => {
-    clearStoredTour(TEST_KEY);
+  it("opens the starter tour on a bare URL (no hash, no storage anywhere)", () => {
     const result = initStore({
       hash: "",
-      key: TEST_KEY,
-      autosave: false,
+      urlSync: false,
+      watchHash: false,
       fallback: starterTour,
     });
     expect(result.source).toBe("starter");
@@ -166,8 +164,7 @@ describe("initStore hydrates the starter template", () => {
   });
 
   it("still opens a blank tour when no fallback is supplied", () => {
-    clearStoredTour(TEST_KEY);
-    const result = initStore({ hash: "", key: TEST_KEY, autosave: false });
+    const result = initStore({ hash: "", urlSync: false, watchHash: false });
     expect(result.source).toBe("new");
     expect(stopCount.value).toBe(0);
   });
@@ -178,48 +175,59 @@ describe("initStore hydrates the starter template", () => {
     shared.title = "Shared tour";
     const result = initStore({
       hash: buildHash(shared),
-      key: TEST_KEY,
-      autosave: false,
+      urlSync: false,
+      watchHash: false,
       fallback: starterTour,
     });
     expect(result.source).toBe("url");
     expect(tour.value.id).toBe("tour_shared");
   });
 
-  it("a saved tour in localStorage wins over the starter template", () => {
-    const saved = starterTour();
-    saved.id = "tour_saved";
-    saved.title = "Saved work";
-    saveTour(saved, TEST_KEY);
-    resetStore();
-    const result = initStore({
-      hash: "",
-      key: TEST_KEY,
-      autosave: false,
-      fallback: starterTour,
-    });
-    expect(result.source).toBe("storage");
-    expect(tour.value.id).toBe("tour_saved");
+  it("a stale localStorage blob cannot shadow the starter any more", () => {
+    // The old build autosaved here. A returning visitor who still has that key
+    // must get the starter on a bare URL, not a resurrected blank map.
+    localStorage.setItem(
+      "tour-brochure-builder:tour",
+      serializeTour({ ...starterTour(), id: "tour_stale", title: "Stale" }),
+    );
+    try {
+      const result = initStore({
+        hash: "",
+        urlSync: false,
+        watchHash: false,
+        fallback: starterTour,
+      });
+      expect(result.source).toBe("starter");
+      expect(tour.value.id).toBe(STARTER_TOUR_ID);
+    } finally {
+      localStorage.clear();
+    }
   });
 
-  it("editing the starter then reloading restores the edit, not the template", () => {
+  it("editing the starter puts the edit — not the template — in the URL", () => {
     vi.useFakeTimers();
-    // First visit: starter template, autosave on.
-    initStore({ hash: "", key: TEST_KEY, fallback: starterTour });
+    // First visit: starter template, URL sync on.
+    initStore({ hash: "", watchHash: false, fallback: starterTour });
     expect(tour.value.id).toBe(STARTER_TOUR_ID);
+    vi.advanceTimersByTime(1000);
+    // Untouched starter == no diff == bare URL.
+    expect(window.location.hash).toBe("");
+
     updateStop(tour.value.routes[0].stops[0].id, { title: "I edited this" });
     addStop({ lat: 41.9, lng: -87.6, title: "My own stop" });
     vi.advanceTimersByTime(1000);
     const afterEdit = serializeTour(tour.value);
 
-    resetStore(); // simulate a reload
+    const { encoded } = parseHash(window.location.hash);
+    expect(encoded).toBeTruthy();
+
+    resetStore(); // simulate a reload: only the address bar survives
     const result = initStore({
-      hash: "",
-      key: TEST_KEY,
-      autosave: false,
+      urlSync: false,
+      watchHash: false,
       fallback: starterTour,
     });
-    expect(result.source).toBe("storage");
+    expect(result.source).toBe("url");
     expect(serializeTour(tour.value)).toBe(afterEdit);
     expect(serializeTour(tour.value)).not.toBe(serializeTour(starterTour()));
   });

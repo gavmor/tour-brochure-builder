@@ -3,8 +3,8 @@
  * import from `src/tour` only.
  */
 
+export * from "./debounce";
 export * from "./files";
-export * from "./persistence";
 export * from "./schema";
 export * from "./store";
 export * from "./urlShare";

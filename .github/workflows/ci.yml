@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+      # The URL hash is the sole source of truth (docs/adr/0002). Production
+      # code must never reach for localStorage; the only matches allowed are
+      # comments explaining that, and the tests that assert it stays true.
+      - name: No localStorage in production code
+        run: |
+          if grep -rn "localStorage" src --include='*.ts' --include='*.tsx' \
+               | grep -v '\.test\.' | grep -vE '^\s*[^:]+:[0-9]+:\s*(\*|//|/\*)'; then
+            echo "::error::localStorage used in production code — see docs/adr/0002-url-sole-source-of-truth.md"
+            exit 1
+          fi

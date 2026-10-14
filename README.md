@@ -19,16 +19,17 @@ pnpm test:watch   # re-run tests on change
 
 ## Tour data and state (`src/tour/`)
 
-There is no backend. A tour lives in browser memory, in `localStorage`, in an
-exported `.json` file, or in a share URL.
+There is no backend, and **no localStorage**: a tour lives in browser memory,
+in the URL hash, or in an exported `.json` file. The URL is the single source
+of truth — see [ADR 0002](docs/adr/0002-url-sole-source-of-truth.md).
 
 | File | What it holds |
 |------|---------------|
 | `schema.ts` | The `Tour → Route[] → Stop[]` model (schema `version: 2`), factories, the route palette, and `stopBlurb` (SPEC D6 itinerary fallback). |
 | `validate.ts` | `parseTour` / `parseTourJson`: validation, graceful repair, and the `version: 1 → 2` migration. Never throws. |
-| `store.ts` | Preact signals (`tour`, `readOnly`, `activeRouteId`, `selectedStopId`, `shareLink`, …) and every action. |
-| `persistence.ts` | Debounced `localStorage` autosave and restore. |
-| `urlShare.ts` | lz-string encode/decode and `#view&t=…` hash parsing. |
+| `store.ts` | Preact signals (`tour`, `readOnly`, `activeRouteId`, `selectedStopId`, `shareLink`, …), every action, and the URL writer (`startUrlSync`). |
+| `debounce.ts` | The debounce the URL writer coalesces keystrokes with. |
+| `urlShare.ts` | lz-string encode/decode, `#view&t=…` hash parsing, and `replaceLocationHash`. |
 | `files.ts` | `.json` download and upload. |
 
 ```ts
@@ -66,23 +67,41 @@ newer schema version, or is not valid JSON.
 
 ### Load order and sharing
 
-On startup `initStore()` applies, in order:
+The URL hash is the only place a tour lives. On startup `initStore()` applies,
+in order:
 
 1. a `#t=` / `#view&t=` share link in the URL hash,
-2. the autosaved tour in `localStorage`,
-3. a blank tour.
+2. the curated Chicago starter template,
+3. a blank tour (only when no template is injected).
+
+There is no localStorage step, so **a bare URL always opens the starter** — a
+returning visitor can never land on a blank map because of something an older
+build wrote. A stale `tour-brochure-builder:tour` key left over from before is
+simply ignored; nothing reads or writes it.
+
+Every mutation — add/move/delete/reorder a stop, a text edit, a route change —
+is re-encoded into the hash and written with `history.replaceState`, debounced
+by 300 ms so a burst of keystrokes costs one write. `replaceState` (never
+`pushState`) keeps the history stack flat: editing does not fill up the Back
+button. While the working tour still equals the starter template byte for byte
+there is no diff to record, so the hash stays empty.
+
+Clearing the hash throws the work away: the hash watcher resets the store to
+the starter template. The app's own writes cannot trigger that — `replaceState`
+does not fire `hashchange`, and the writer additionally ignores an echo of the
+hash it just wrote.
 
 `#view` opens the tour **read-only** (SPEC D2): mutating actions are refused
-and autosave is suppressed, so opening someone else's link can never overwrite
-your own working tour. `editCopy()` clones the viewed tour under a fresh
-`tour.id`, unlocks editing, and saves it as the working tour. A share link
-pasted into the address bar of an already-open app is picked up by the hash
-watcher.
+and the URL writer is suppressed, so opening someone else's link never rewrites
+it. `editCopy()` clones the viewed tour under a fresh `tour.id`, unlocks
+editing, and immediately takes over the address bar as an editable `#t=` link —
+the original `#view` link keeps working, because nothing shared is mutated.
 
 Share URLs are lz-string-compressed and have a practical ceiling around 8,000
 characters (SPEC §6). The store exposes `shareEncodedLength`, `shareUrlLength`
-and `shareUrlWarning` (`"ok" | "warn" | "too-long"`) so the UI can warn above
-6,000 instead of emitting a link that silently truncates.
+and `shareUrlWarning` (`"ok" | "warn" | "too-long"`), recomputed from the live
+tour — which is to say, from what is in the address bar — so the UI can warn
+above 6,000 instead of emitting a link that silently truncates.
 
 ## Map editor (`src/editor/`)
 

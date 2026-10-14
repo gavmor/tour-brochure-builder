@@ -1,17 +1,18 @@
 /**
  * Curated static starter tour (task t_d7de7a2a).
  *
- * A first visit with no tour in the URL and nothing in localStorage opens this
- * populated, fully-editable tour instead of a blank map — "choice-first UX":
- * present a set of choices already made that the user can trim, edit or clear,
- * rather than an empty form that demands typing (epic t_f3a98cf7).
+ * A first visit with no tour in the URL opens this populated, fully-editable
+ * tour instead of a blank map — "choice-first UX": present a set of choices
+ * already made that the user can trim, edit or clear, rather than an empty
+ * form that demands typing (epic t_f3a98cf7). Since the URL is the only place
+ * state lives (ADR 0002), a bare URL *always* lands here.
  *
  * It is a plain `Tour` built through the ordinary `createTour`/`createRoute`/
  * `createStop` factories, so every seeded stop is byte-for-byte the same shape
  * as a stop the user adds by clicking the map. There is no "seeded" or "locked"
  * flag anywhere: edit, delete and reorder all work identically, and the moment
- * the user changes anything the store serialises it to the share URL and
- * localStorage like any other tour.
+ * the user changes anything the store encodes it into the share URL like any
+ * other tour.
  *
  * Content: a six-stop downtown Chicago walking loop, mirroring the project's
  * reference brochure. Coordinates are real so the map and polyline render

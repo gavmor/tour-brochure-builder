@@ -184,7 +184,10 @@ t_2c1641fe / t_5b1e3e49:
   brochure transition. This is what makes editing feel instant.
 - **Tier 2, `sessionStorage`** — survives reload and print-preview navigation within the
   tab. Session-scoped on purpose: geometry is derived data with an upstream that can
-  change, and `localStorage` is already the tour's own autosave slot.
+  change, and the tour itself is stored elsewhere. (At the time of writing that was the
+  `localStorage` autosave; [ADR 0002](0002-url-sole-source-of-truth.md) has since moved
+  the tour into the URL hash. The reasoning is unaffected: this tier caches *derived*
+  data, and a `sessionStorage` cache of recomputable geometry is explicitly still allowed.)
 - **Budget it:** cap the sessionStorage mirror (say 1 MB) and evict oldest-first;
   `sessionStorage` throws on quota and that must not break a render.
 - **Never write geometry back into `Tour`.** The cache is keyed *off* tour data and lives

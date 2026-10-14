@@ -133,12 +133,11 @@ export function Brochure() {
   };
 
   const handleEditCopy = () => {
-    const copy = editCopyFlow();
-    setStatus(
-      copy
-        ? { tone: "ok", text: "Editing a copy. The shared link is unchanged." }
-        : { tone: "ok", text: "Kept the tour saved in this browser." },
-    );
+    editCopyFlow();
+    setStatus({
+      tone: "ok",
+      text: "Editing a copy. The link you were sent is unchanged.",
+    });
   };
 
   return (
@@ -179,8 +178,9 @@ export function Brochure() {
 
       {locked ? (
         <p class="brochure__banner no-print" role="status">
-          You are viewing a shared tour. It is read-only, so your own saved tour
-          is untouched — use <strong>Edit a copy</strong> to work on it.
+          You are viewing a shared tour. It is read-only, so the link you were
+          sent keeps working exactly as it is — use <strong>Edit a copy</strong>{" "}
+          to work on it.
         </p>
       ) : null}
 

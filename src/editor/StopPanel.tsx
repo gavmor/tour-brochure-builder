@@ -2,8 +2,8 @@
  * Edit panel for the selected stop.
  *
  * Text fields write straight through to the store on input (it is the only
- * copy of the tour, and autosave is debounced downstream). The image URL is
- * the exception: it is held as a draft until it is a usable `https:` URL, so
+ * copy of the tour, and the URL writer is debounced downstream). The image URL
+ * is the exception: it is held as a draft until it is a usable `https:` URL, so
  * half-typed addresses never reach the store and never reach the share link.
  */
 
