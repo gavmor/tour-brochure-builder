@@ -39,6 +39,34 @@ describe("factories", () => {
     const stop = createStop({ lat: 1, lng: 2 });
     expect(Object.keys(stop).sort()).toEqual(["id", "lat", "lng", "title"]);
   });
+
+  it("stores the default travel mode as absence (ADR 0001)", () => {
+    // `"profile":"foot"` on every route is share-URL budget for no
+    // information, so the factory spreads it conditionally the way `via` is.
+    expect(Object.keys(createRoute())).toEqual([
+      "id",
+      "name",
+      "color",
+      "stops",
+    ]);
+    expect("profile" in createRoute({ profile: "foot" })).toBe(false);
+    expect(createRoute({ profile: "driving" }).profile).toBe("driving");
+  });
+
+  it("keeps `profile` last, after `via`, so serialization is key-stable", () => {
+    const route = createRoute({
+      via: [[41.88, -87.62]],
+      profile: "bike",
+    });
+    expect(Object.keys(route)).toEqual([
+      "id",
+      "name",
+      "color",
+      "stops",
+      "via",
+      "profile",
+    ]);
+  });
 });
 
 describe("itinerary numbering", () => {

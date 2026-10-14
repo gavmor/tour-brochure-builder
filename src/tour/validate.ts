@@ -12,9 +12,13 @@
 import { z } from "zod";
 import {
   createRoute,
+  DEFAULT_ROUTE_PROFILE,
+  isRouteProfile,
   newId,
   ROUTE_COLORS,
+  ROUTE_PROFILES,
   type Route,
+  type RouteProfile,
   type Stop,
   TOUR_SCHEMA_VERSION,
   type Tour,
@@ -38,6 +42,9 @@ const routeSchema = z.object({
   color: z.string().min(1),
   stops: z.array(stopSchema),
   via: z.array(z.tuple([z.number(), z.number()])).optional(),
+  // Additive in v2 (ADR 0001): a tour without `profile` is still a valid v2
+  // tour, so `TOUR_SCHEMA_VERSION` does not move and old links keep loading.
+  profile: z.enum(ROUTE_PROFILES).optional(),
 });
 
 const tourSchema = z.object({
@@ -184,6 +191,31 @@ function repairVia(raw: unknown, warn: (m: string) => void, where: string) {
   return points.length ? points : undefined;
 }
 
+/**
+ * Travel mode, repaired in the same spirit as everything else here: a value
+ * we do not recognise warns and falls back to the default, it never fails the
+ * parse (ADR 0001 — a hand-edited URL must still render).
+ *
+ * An explicit `"foot"` is dropped rather than kept, because `createRoute`
+ * omits the default: canonical output has to be the same whether a route came
+ * from the factory or from a parse, or share links stop round-tripping
+ * byte-identically.
+ */
+function repairProfile(
+  raw: unknown,
+  warn: (m: string) => void,
+  where: string,
+): RouteProfile | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (!isRouteProfile(raw)) {
+    warn(
+      `${where}: unknown routing profile "${String(raw)}"; used "${DEFAULT_ROUTE_PROFILE}"`,
+    );
+    return undefined;
+  }
+  return raw === DEFAULT_ROUTE_PROFILE ? undefined : raw;
+}
+
 function repairRoute(
   raw: unknown,
   index: number,
@@ -218,6 +250,8 @@ function repairRoute(
   };
   const via = repairVia(raw.via, warn, where);
   if (via) route.via = via;
+  const profile = repairProfile(raw.profile, warn, where);
+  if (profile) route.profile = profile;
   return route;
 }
 

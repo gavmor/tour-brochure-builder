@@ -89,6 +89,13 @@ lines will cut through blocks and across water. Two mitigations, in order of cos
 > storing geometry in `route.geometry` costs 11,443 share-URL characters against an 8,000
 > ceiling. [ADR 0001](adr/0001-route-geometry-storage.md) replaces it with a per-route
 > `profile` field, recompute-on-load, and a session cache. `route.via` (1) is unchanged.
+>
+> **Shipped** on t_2c1641fe. Both maps draw the straight polyline as a placeholder and
+> replace it with road geometry when the router answers; a failure keeps the straight line
+> and dashes it, with an "approximate route" tooltip in the editor and a note in the
+> brochure legend. The author picks the travel mode per route (Walk / Bike / Car, stored
+> as `profile`, absent meaning foot). See [ROUTING.md](ROUTING.md) — "How the map views
+> consume it".
 
 ### D5 — Data shape (confirmed by implication)
 

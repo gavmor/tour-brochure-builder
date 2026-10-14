@@ -249,15 +249,30 @@ export function addRoute(init: Partial<Route> = {}): Route | null {
   return route;
 }
 
+/**
+ * Patch a route's fields. An `undefined` value *removes* the key rather than
+ * writing `undefined` into it — `{ profile: undefined }` is how the editor
+ * says "back to the default", and ADR 0001 requires the default to be absent
+ * from the serialized tour, not present-and-undefined.
+ */
 export function updateRoute(
   routeId: string,
   patch: Partial<Omit<Route, "id" | "stops">>,
 ): boolean {
   let found = false;
   mutate((draft) => {
-    const route = draft.routes.find((r) => r.id === routeId);
-    if (!route) return;
-    Object.assign(route, patch);
+    const index = draft.routes.findIndex((r) => r.id === routeId);
+    if (index === -1) return;
+    const next: Record<string, unknown> = { ...draft.routes[index] };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    // Rebuilt through the factory, not assigned in place, so the key order
+    // always matches `createRoute` — a patch that adds `via` to a route that
+    // already carries `profile` would otherwise append it in the wrong place
+    // and the share payload would stop being byte-stable.
+    draft.routes[index] = createRoute(next as Partial<Route>, index);
     found = true;
   });
   return found;

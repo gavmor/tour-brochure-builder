@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { editCopyFlow, showEditor } from "../appState";
 import { OSM_ATTRIBUTION } from "../editor/leafletSetup";
+import { routingAttributionHtml } from "../editor/routeGeometry";
 import {
   readOnly,
   shareLink,
@@ -229,11 +230,15 @@ export function Brochure() {
               that control from the printed page, so the brochure prints its
               own copy of the same string — `OSM_ATTRIBUTION` is the constant
               Leaflet is configured with, a module literal rather than tour
-              data, so the inner HTML is ours and not user input.
+              data, so the inner HTML is ours and not user input. The routing
+              endpoints (ADR 0001) are credited the same way and for the same
+              reason: their geometry is on the printed page.
             */}
             <p
               class="brochure__attribution"
-              dangerouslySetInnerHTML={{ __html: OSM_ATTRIBUTION }}
+              dangerouslySetInnerHTML={{
+                __html: `${OSM_ATTRIBUTION} &middot; ${routingAttributionHtml}`,
+              }}
             />
           </div>
           <ItineraryColumn />

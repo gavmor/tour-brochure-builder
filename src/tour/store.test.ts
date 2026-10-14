@@ -284,6 +284,37 @@ describe("route actions", () => {
     ]);
     expect(reorderRoutes(0, 5)).toBe(false);
   });
+
+  it("updateRoute sets a travel mode and clears it back to absence", () => {
+    // ADR 0001: the default is stored as a missing key, so the editor's
+    // "back to Walk" has to delete the field, not write `undefined` into it.
+    expect(updateRoute("route_red", { profile: "driving" })).toBe(true);
+    expect(tour.value.routes[1].profile).toBe("driving");
+    expect(serializeTour(tour.value)).toContain('"profile":"driving"');
+
+    expect(updateRoute("route_red", { profile: undefined })).toBe(true);
+    expect("profile" in tour.value.routes[1]).toBe(false);
+    expect(serializeTour(tour.value)).not.toContain("profile");
+  });
+
+  it("updateRoute keeps the canonical key order whatever it patches", () => {
+    updateRoute("route_green", { profile: "bike" });
+    updateRoute("route_green", { via: [[41.89, -87.62]] });
+    expect(Object.keys(tour.value.routes[0])).toEqual([
+      "id",
+      "name",
+      "color",
+      "stops",
+      "via",
+      "profile",
+    ]);
+  });
+
+  it("updateRoute leaves the stops alone", () => {
+    const before = tour.value.routes[0].stops.map((s) => s.id);
+    updateRoute("route_green", { profile: "bike", name: "Emerald" });
+    expect(tour.value.routes[0].stops.map((s) => s.id)).toEqual(before);
+  });
 });
 
 describe("setTourMeta", () => {

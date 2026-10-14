@@ -212,6 +212,43 @@
   border-color: #22303c;
 }
 
+/* --------------------------------------------------------- route routing */
+
+/* The travel-mode select sits in its own row so the label's hint has space;
+   it is the only control here whose value reaches the network. */
+.field--profile select {
+  font: inherit;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #d6cfc2;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+}
+
+/* Routing status for the active route: quiet by default, because "following
+   streets" is the expected case and does not deserve attention. */
+.route-status {
+  margin: -0.3rem 0 0.6rem;
+  font-size: 0.78rem;
+  color: #6b6459;
+}
+
+/* The approximate state does deserve attention — it is the one case where
+   what the author sees is not what the router said. Matched by the dashed
+   polyline on the map and the legend note in the brochure. */
+.route-status--approximate {
+  color: #8a5a00;
+}
+
+.route-status--approximate::before {
+  content: "";
+  display: inline-block;
+  width: 1.4rem;
+  margin-right: 0.35rem;
+  vertical-align: 0.2em;
+  border-top: 2px dashed currentColor;
+}
+
 .route-panel__actions {
   display: flex;
   align-items: center;

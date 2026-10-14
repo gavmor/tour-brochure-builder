@@ -5,6 +5,27 @@
  * *within its route*, so numbering restarts at 1 for every route.
  */
 
+import {
+  DEFAULT_ROUTE_PROFILE,
+  isRouteProfile,
+  ROUTE_PROFILES,
+  type RouteProfile,
+} from "../routing/types";
+
+/**
+ * Re-exported, not redeclared (ADR 0001): the travel-mode union has exactly
+ * one definition, in the routing layer, and `Route.profile` is the same type
+ * the router is handed. `src/routing/types.ts` is a leaf module — plain types
+ * and constants, no Leaflet, no fetch — so the tour layer picking it up costs
+ * nothing and introduces no cycle.
+ */
+export {
+  DEFAULT_ROUTE_PROFILE,
+  isRouteProfile,
+  ROUTE_PROFILES,
+  type RouteProfile,
+};
+
 export const TOUR_SCHEMA_VERSION = 2 as const;
 
 /** A single point on a route. */
@@ -29,10 +50,22 @@ export interface Route {
   color: string;
   stops: Stop[];
   /**
-   * Optional shape points for the polyline (SPEC D4). v1 draws straight
-   * segments; `via` is the manual fidelity escape hatch, no routing service.
+   * Optional shape points for the polyline (SPEC D4). Author-drawn, and
+   * unrelated to routing: where both exist the `via` points are handed to the
+   * router as intermediate waypoints rather than discarded (ADR 0001).
    */
   via?: [number, number][];
+  /**
+   * Road-routing travel mode. **Absent means `foot`** — the default is never
+   * written out, because `"profile":"foot"` on every route is share-URL budget
+   * for no information (ADR 0001). Read it as `route.profile ?? "foot"`, or
+   * better, through `profileOf()` in `src/editor/routeGeometry.ts`.
+   *
+   * Geometry itself is deliberately *not* a field here: ADR 0001 measured a
+   * geometry-bearing share URL at 143 % of the 8,000-char ceiling and chose to
+   * recompute at view time instead.
+   */
+  profile?: RouteProfile;
 }
 
 export interface TourSettings {
@@ -118,6 +151,11 @@ export function createRoute(init: Partial<Route> = {}, index = 0): Route {
     stops: init.stops ? init.stops.map((s) => ({ ...s })) : [],
     ...(init.via
       ? { via: init.via.map((p) => [p[0], p[1]] as [number, number]) }
+      : {}),
+    // Spread conditionally, exactly as `via` is: the default profile is
+    // *absent*, never serialized (ADR 0001).
+    ...(init.profile !== undefined && init.profile !== DEFAULT_ROUTE_PROFILE
+      ? { profile: init.profile }
       : {}),
   };
 }
