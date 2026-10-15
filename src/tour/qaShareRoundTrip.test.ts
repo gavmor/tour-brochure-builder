@@ -75,7 +75,7 @@ function editTheSeededTour(): Tour {
   });
   updateStop(second.id, { category: "museum", blurb: "Edited blurb" });
   reorderStops(1, 0, route.id); // drag the museum to the top
-  updateRoute(route.id, { color: ROUTE_COLORS[6], profile: "cycling" });
+  updateRoute(route.id, { color: ROUTE_COLORS[6], profile: "bike" });
   addStop({ lat: 41.8705, lng: -87.6505, title: "Stop 7" }, route.id); // map click
   setTourMeta({ title: "QA edited tour", tagline: "Edited tagline" });
 
@@ -83,14 +83,14 @@ function editTheSeededTour(): Tour {
 }
 
 beforeEach(() => {
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 afterEach(() => {
   stopUrlSync();
   stopHashWatcher();
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
@@ -125,9 +125,8 @@ describe("seeded -> edited -> share URL -> fresh load (epic item 7)", () => {
     const edited = editTheSeededTour();
     const hash = buildHash(edited, { view: true });
 
-    // A different browser: only the pasted URL (the hash is the only store).
+    // A different browser: nothing but the pasted URL (the hash is the only store).
     resetStore();
-    localStorage.clear();
     const boot = initStore({
       hash,
       urlSync: false,
@@ -143,7 +142,7 @@ describe("seeded -> edited -> share URL -> fresh load (epic item 7)", () => {
     // The edits, not the template.
     expect(tour.value.title).toBe("QA edited tour");
     expect(totalStops(tour.value)).toBe(7);
-    expect(routeProfile(tour.value.routes[0])).toBe("cycling");
+    expect(routeProfile(tour.value.routes[0])).toBe("bike");
     expect(tour.value.routes[0].color).toBe(ROUTE_COLORS[6]);
     expect(stopCategory(tour.value.routes[0].stops[0])).toBe("museum");
   });

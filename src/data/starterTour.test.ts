@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { totalStops } from "../tour/schema";
+import {
+  categoryMeta,
+  DEFAULT_ROUTE_PROFILE,
+  DEFAULT_STOP_CATEGORY,
+  routeProfile,
+  stopCategory,
+  totalStops,
+} from "../tour/schema";
 import {
   addStop,
   deleteStop,
@@ -85,6 +92,33 @@ describe("starterTour template", () => {
         }
       }
     }
+  });
+
+  /**
+   * QA-BUG-7: the starter used to set no category at all, so every seeded stop
+   * rendered the generic 📍 and a first visit never saw the preset system do
+   * anything.
+   */
+  it("gives every seeded stop a category, and not all the same one", () => {
+    const stops = starterTour().routes.flatMap((r) => r.stops);
+    for (const stop of stops) {
+      expect(stop.category).toBeDefined();
+      expect(stopCategory(stop)).not.toBe(DEFAULT_STOP_CATEGORY);
+      // A category only counts if the icon lookup knows it.
+      expect(categoryMeta(stopCategory(stop)).icon).not.toBe("📍");
+    }
+    expect(new Set(stops.map(stopCategory)).size).toBeGreaterThan(2);
+  });
+
+  /**
+   * The other half of QA-BUG-7: the route's `profile` is *meant* to be absent.
+   * Walking is the default and the factories store a default as absence, which
+   * is what keeps an untouched starter's share URL empty (§6).
+   */
+  it("leaves the route profile at the default, stored as absence", () => {
+    const route = starterTour().routes[0];
+    expect(route.profile).toBeUndefined();
+    expect(routeProfile(route)).toBe(DEFAULT_ROUTE_PROFILE);
   });
 
   it("returns an independent object graph on every call", () => {

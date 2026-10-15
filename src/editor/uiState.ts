@@ -69,3 +69,23 @@ export function closeNearby(): void {
 export function round6(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }
+
+/**
+ * A default blurb for a stop dropped on the map: its coordinates, in the
+ * hemispheric form a reader can act on.
+ *
+ * Choice-first UX §3 says the two remaining free-text fields "must be
+ * pre-filled with sensible editable defaults instead of blank fields", and a
+ * map-click stop arrived with an empty blurb — so the itinerary column printed
+ * nothing for it (QA-BUG-6). Coordinates are the only thing known for certain
+ * at that moment: reverse geocoding would mean a network call per click, a
+ * usage policy, and a wait before the panel can be typed into.
+ *
+ * Four decimals is ~10 m, which is the right precision for a line a human
+ * reads; the stop itself keeps its full `round6` position.
+ */
+export function coordBlurb(lat: number, lng: number): string {
+  const axis = (value: number, positive: string, negative: string) =>
+    `${Math.abs(value).toFixed(4)}°${value < 0 ? negative : positive}`;
+  return `${axis(lat, "N", "S")}, ${axis(lng, "E", "W")}`;
+}

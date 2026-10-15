@@ -13,14 +13,13 @@
  * storage beats the starter" pin and its `it.fails` canary — describe a layer
  * that no longer exists and are dropped rather than rewritten. The guard that
  * replaces them is the last test here: a stale key from an older build is
- * ignored outright. (CI also fails the build on `localStorage` in src/.)
+ * ignored outright. (CI also fails the build on `localStorage` in production
+ * code — `.test.` files are exempt.)
  *
  * The URL-shaped cases are the ones that still matter and are kept verbatim:
  * - a corrupt share link falls back to the curated starter rather than a blank
- *   or broken app, and the decode error is still reported on the InitResult.
- *   NOTE: as of this run the editor does NOT surface that error to the user
- *   (QA-BUG-2, filed from task t_9f25df7e) — the error reaching InitResult is
- *   what a future fix will hang the notice on, so it is asserted here.
+ *   or broken app, the decode error survives on the `InitResult`, *and* it is
+ *   published to `lastLoadNotice` so the editor can show a banner (QA-BUG-2).
  * - a broken starter template still leaves an editable blank tour.
  *
  * The QA-BUG-4 pin came back from task t_cde077ad as BUG-13, re-stated in
@@ -34,6 +33,7 @@ import { totalStops } from "./schema";
 import {
   deleteStop,
   initStore,
+  lastLoadNotice,
   reorderStops,
   resetStore,
   stopHashWatcher,
@@ -56,14 +56,14 @@ const CORRUPT_HASH = "#t=NOT-A-REAL-PAYLOAD-%%%";
 const JUNK_HASH = "#t=N4IgFgpgNlD2IC4QHdYCcoBMQF8g";
 
 beforeEach(() => {
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
 afterEach(() => {
   stopUrlSync();
   stopHashWatcher();
-  localStorage.clear();
+  window.location.hash = "";
   resetStore();
 });
 
@@ -96,6 +96,37 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     expect(result.errors.join(" ")).toMatch(/corrupt|truncated|Empty/i);
   });
 
+  /**
+   * QA-BUG-2 (task t_9f25df7e): the decode error used to reach `InitResult`
+   * and stop there — the starter hydration overwrote `lastLoadNotice`, so the
+   * editor's error banner never rendered and a broken link looked like an
+   * ordinary first visit. The notice must survive the fallback.
+   */
+  it("publishes the corrupt-link error to lastLoadNotice (QA-BUG-2)", () => {
+    boot({ hash: CORRUPT_HASH });
+    const notice = lastLoadNotice.value;
+    expect(notice).not.toBeNull();
+    expect(notice?.errors.length).toBeGreaterThan(0);
+    // The editor keys its "showing the starter tour" copy off this.
+    expect(notice?.fallback).toBe("starter");
+  });
+
+  it("says 'blank tour' when there was no starter to fall back to", () => {
+    initStore({
+      hash: CORRUPT_HASH,
+      urlSync: false,
+      watchHash: false,
+    });
+    expect(lastLoadNotice.value?.fallback).toBe("new");
+    expect(lastLoadNotice.value?.errors.length).toBeGreaterThan(0);
+  });
+
+  it("leaves no notice behind on an ordinary first load", () => {
+    boot();
+    expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
+    expect(lastLoadNotice.value?.fallback).toBeUndefined();
+  });
+
   it("still leaves an editable tour when the starter template itself is broken", () => {
     const result = initStore({
       hash: "",
@@ -119,6 +150,7 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     const second = boot();
     expect(second.source).toBe("starter");
     expect(second.errors).toEqual([]);
+    expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
   });
 
   it("a #t= payload that repairs to zero recognised fields yields the curated starter (BUG-13)", () => {
@@ -176,6 +208,7 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     expect(result.source).toBe("starter");
     expect(tour.value.title).toBe("Chicago Downtown Walking Tour");
     expect(totalStops(tour.value)).toBe(6);
+    localStorage.clear();
   });
 });
 
