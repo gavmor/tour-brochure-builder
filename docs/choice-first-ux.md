@@ -119,11 +119,16 @@ Every control below ships with (i) a defined **option set**, (ii) a **default al
 
 ### 3a. Route profile — segmented control / chips
 
-- **Options:** `walking` · `driving` · `cycling` (exactly these three; they map to future OSRM profiles and to polyline styling).
+- **Options:** Walking · Driving · Cycling (exactly these three).
 - **Control:** segmented control (single-select chips). Always exactly one selected — there is no "unset."
-- **Default:** inherited from the tour (starter template default = **walking**).
-- **Reset:** a "Reset to default" affordance on the route panel returns it to **walking**. (There is no "clear to empty" — a route always has a profile.)
-- **Effect:** choice is cosmetic for the smoke scope (polyline style/label); semantics reserved for real routing later.
+- **Default:** inherited from the tour (starter template default = **Walking**).
+- **Reset:** a "Reset to default" affordance on the route panel returns it to **Walking**. (There is no "clear to empty" — a route always has a profile.)
+- **Effect:** ~~cosmetic for the smoke scope~~ — **real** as of t_2c1641fe. The choice selects the routing host the road geometry comes from.
+- **Stored ids:** `foot` · `driving` · `bike`, not the labels. The names are
+  ADR 0001's, because they are what `src/routing/endpoints.ts` keys a FOSSGIS
+  host on. The labels above are unchanged; only what goes in the URL moved.
+  Links emitted by this card's build (`walking` / `cycling`) migrate silently
+  — see [ADR 0001 § Vocabulary collision](adr/0001-route-geometry-storage.md).
 
 ### 3b. Route color — swatch palette
 

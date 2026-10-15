@@ -27,7 +27,15 @@ import {
   fixLeafletDefaultIcons,
 } from "./leafletSetup";
 import { badgeSignature, safeColor, stopIcon } from "./markers";
-import { type LatLng, routeBounds, routeLatLngs } from "./shape";
+import {
+  APPROXIMATE_DASH,
+  approximateTooltip,
+  routeDrawBounds,
+  routeGeometry,
+  routingAttributionHtml,
+  syncRouteGeometry,
+} from "./routeGeometry";
+import { type LatLng, routeLatLngs } from "./shape";
 import {
   addMode,
   fitRequest,
@@ -39,9 +47,9 @@ import {
   shapeMode,
 } from "./uiState";
 
-/** Every point the tour draws, for bounds fitting. */
+/** Every point the tour draws, for bounds fitting — road geometry included. */
 function tourPoints(current: Tour): LatLng[] {
-  return current.routes.flatMap(routeBounds);
+  return current.routes.flatMap(routeDrawBounds);
 }
 
 function fitToTour(map: L.Map, current: Tour): void {
@@ -82,6 +90,7 @@ export function MapEditor() {
   const locked = readOnly.value;
   const activeId = activeRoute.value?.id ?? null;
   const fitNonce = fitRequest.value;
+  const geometry = routeGeometry.value;
 
   // ------------------------------------------------------------------ mount
   useEffect(() => {
@@ -95,6 +104,10 @@ export function MapEditor() {
       zoomControl: true,
     });
     createTileLayer().addTo(map);
+    // The tile layer carries the OSM credit; the routing endpoints are a
+    // separate obligation and a separate line in the control (ADR 0001 /
+    // FOSSGIS usage policy).
+    map.attributionControl?.addAttribution(routingAttributionHtml);
     viaLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
@@ -231,6 +244,15 @@ export function MapEditor() {
     }
   }, [proposals]);
 
+  // ----------------------------------------------------- road geometry
+  // Ask the routing service for road geometry whenever the *request* changes
+  // (stops added, removed, reordered or moved; profile switched). Renames and
+  // recolors do not reach the network — `syncRouteGeometry` compares cache
+  // keys, and the service debounces what is left.
+  useEffect(() => {
+    syncRouteGeometry(current);
+  }, [current]);
+
   // -------------------------------------------------------------- polylines
   useEffect(() => {
     const map = mapRef.current;
@@ -240,8 +262,14 @@ export function MapEditor() {
 
     for (const route of current.routes) {
       seen.add(route.id);
-      const latlngs = routeLatLngs(route);
-      const visible = !hidden.includes(route.id) && latlngs.length >= 2;
+      // The straight line is the placeholder and the fallback: it is drawn
+      // the moment a route exists, and road geometry replaces it only once
+      // the router answers. A route is never blank.
+      const straight = routeLatLngs(route);
+      const geo = geometry[route.id];
+      const latlngs = geo?.coords ?? straight;
+      const approximate = geo?.approximate ?? false;
+      const visible = !hidden.includes(route.id) && straight.length >= 2;
       const isActive = route.id === activeId;
       let line = lines.get(route.id);
 
@@ -278,7 +306,20 @@ export function MapEditor() {
         color: safeColor(route.color),
         weight: isActive ? 5 : 3,
         opacity: isActive ? 0.95 : 0.6,
+        // Leaflet removes the attribute outright on a falsy `dashArray`, so
+        // this both sets and clears the approximate styling.
+        dashArray: approximate ? APPROXIMATE_DASH : undefined,
       });
+      // Say *why* the line is straight. Leaflet tooltips are pointer-events
+      // none, so this does not get in the way of shift-click shaping.
+      if (approximate) {
+        line.bindTooltip(approximateTooltip(geo?.reason), {
+          sticky: true,
+          className: "route-tooltip--approximate",
+        });
+      } else {
+        line.unbindTooltip();
+      }
       if (visible && !map.hasLayer(line)) line.addTo(map);
       if (!visible && map.hasLayer(line)) line.remove();
     }
@@ -288,7 +329,7 @@ export function MapEditor() {
       line.remove();
       lines.delete(id);
     }
-  }, [current, hidden, activeId]);
+  }, [current, hidden, activeId, geometry]);
 
   // ---------------------------------------------------------------- markers
   useEffect(() => {

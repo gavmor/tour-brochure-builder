@@ -58,6 +58,7 @@ export const lastLoadNotice = signal<{
 } | null>(null);
 
 export const routes = computed<Route[]>(() => tour.value.routes);
+
 export const stopCount = computed<number>(() => totalStops(tour.value));
 
 export const activeRoute = computed<Route | undefined>(() => {
@@ -70,10 +71,13 @@ export const activeRoute = computed<Route | undefined>(() => {
 export const shareLink = computed<ShareLink>(() =>
   buildShareLink(tour.value, { view: true }),
 );
+
 export const shareUrlLength = computed<number>(() => shareLink.value.urlLength);
+
 export const shareEncodedLength = computed<number>(
   () => shareLink.value.encodedLength,
 );
+
 export const shareUrlWarning = computed<"ok" | "warn" | "too-long">(() => {
   const link = shareLink.value;
   if (link.tooLong) return "too-long";
@@ -250,21 +254,30 @@ export function addRoute(init: Partial<Route> = {}): Route | null {
   return route;
 }
 
+/**
+ * Patch a route's fields. An `undefined` value *removes* the key rather than
+ * writing `undefined` into it — `{ profile: undefined }` is how the editor
+ * says "back to the default", and ADR 0001 requires the default to be absent
+ * from the serialized tour, not present-and-undefined.
+ */
 export function updateRoute(
   routeId: string,
   patch: Partial<Omit<Route, "id" | "stops">>,
 ): boolean {
   let found = false;
   mutate((draft) => {
-    const route = draft.routes.find((r) => r.id === routeId);
-    if (!route) return;
-    Object.assign(route, patch);
-    // An explicit `undefined` clears the field (e.g. resetting the profile to
-    // its default), which keeps it out of the serialized tour / share URL.
+    const index = draft.routes.findIndex((r) => r.id === routeId);
+    if (index === -1) return;
+    const next: Record<string, unknown> = { ...draft.routes[index] };
     for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined)
-        delete (route as unknown as Record<string, unknown>)[key];
+      if (value === undefined) delete next[key];
+      else next[key] = value;
     }
+    // Rebuilt through the factory, not assigned in place, so the key order
+    // always matches `createRoute` — a patch that adds `via` to a route that
+    // already carries `profile` would otherwise append it in the wrong place
+    // and the share payload would stop being byte-stable.
+    draft.routes[index] = createRoute(next as Partial<Route>, index);
     found = true;
   });
   return found;
@@ -387,12 +400,14 @@ export function editCopy(options: { titleSuffix?: string } = {}): Tour {
  * every later edit updates it.
  */
 let fallbackFactory: (() => Tour | unknown) | null = null;
+
 let fallbackSnapshot: string | null = null;
 
 /** The last hash this module wrote, so the watcher can ignore its own echo. */
 let lastWrittenHash: string | null = null;
 
 let pendingUrlWrite: Debounced<[Tour]> | null = null;
+
 let disposeUrlSync: (() => void) | null = null;
 
 /** The hash a given tour should occupy: empty while it still is the starter. */
@@ -617,3 +632,4 @@ export function resetStore(): void {
     lastLoadNotice.value = null;
   });
 }
+// weave: run 'weave explain src/tour/store.ts' for per-hunk detail, 'weave check' to verify your resolution

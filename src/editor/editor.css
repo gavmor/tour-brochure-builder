@@ -224,6 +224,32 @@
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
 }
 
+/* --------------------------------------------------------- route routing */
+
+/* Routing status for the active route: quiet by default, because "following
+   streets" is the expected case and does not deserve attention. */
+.route-status {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: #6b6459;
+}
+
+/* The approximate state does deserve attention — it is the one case where
+   what the author sees is not what the router said. Matched by the dashed
+   polyline on the map and the legend note in the brochure. */
+.route-status--approximate {
+  color: #8a5a00;
+}
+
+.route-status--approximate::before {
+  content: "";
+  display: inline-block;
+  width: 1.4rem;
+  margin-right: 0.35rem;
+  vertical-align: 0.2em;
+  border-top: 2px dashed currentColor;
+}
+
 .route-panel__actions {
   display: flex;
   align-items: center;
