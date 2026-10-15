@@ -64,6 +64,7 @@ export function starterTour(): Tour {
             lat: 41.8827,
             lng: -87.6233,
             title: 'Cloud Gate ("The Bean")',
+            category: "attraction",
             blurb: "Millennium Park, upper level off Michigan Avenue",
             description:
               "Anish Kapoor's mirror-polished stainless-steel sculpture, " +
@@ -74,6 +75,7 @@ export function starterTour(): Tour {
             lat: 41.8796,
             lng: -87.6237,
             title: "Art Institute of Chicago",
+            category: "museum",
             blurb: "111 S Michigan Ave, guarded by the two bronze lions",
             description:
               "One of the oldest and largest art museums in the US, from " +
@@ -84,6 +86,7 @@ export function starterTour(): Tour {
             lat: 41.8758,
             lng: -87.6189,
             title: "Buckingham Fountain",
+            category: "historic",
             blurb: "Center of Grant Park, facing the lake",
           }),
           createStop({
@@ -91,6 +94,7 @@ export function starterTour(): Tour {
             lat: 41.888,
             lng: -87.627,
             title: "Chicago Riverwalk",
+            category: "nature",
             blurb: "South bank of the Chicago River at Michigan Avenue",
             description:
               "A pedestrian path hugging the river past cafes, kayak docks " +
@@ -101,6 +105,7 @@ export function starterTour(): Tour {
             lat: 41.8789,
             lng: -87.6359,
             title: "Willis Tower Skydeck",
+            category: "viewpoint",
             blurb: "233 S Wacker Dr, 103rd floor",
             description:
               "Glass-floored ledges that cantilever out over South Wacker " +
@@ -111,6 +116,7 @@ export function starterTour(): Tour {
             lat: 41.8917,
             lng: -87.6086,
             title: "Navy Pier",
+            category: "attraction",
             blurb: "600 E Grand Ave, out over Lake Michigan",
             description:
               "A 1916 pier turned lakefront attraction: the Centennial " +
