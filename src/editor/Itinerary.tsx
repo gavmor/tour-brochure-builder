@@ -9,6 +9,7 @@
 
 import { useEffect, useRef } from "preact/hooks";
 import Sortable from "sortablejs";
+import { revealWithinScroller, rowForStop } from "../shared/revealRow";
 import {
   activeRoute,
   activeRouteId,
@@ -85,10 +86,14 @@ function RouteSection({ route }: { route: Route }) {
   }, [locked]);
 
   // Clicking a marker selects a stop; bring its row into view (SPEC §3).
+  // Scoped to the sidebar's own scroller on purpose: `scrollIntoView` also
+  // scrolls the document, and in the narrow layout the document is the only
+  // scroller — which is how tapping the map to add a stop used to jump the
+  // whole page. See `revealWithinScroller`.
   useEffect(() => {
     if (!selected) return;
-    const row = listRef.current?.querySelector(`[data-stop-id="${selected}"]`);
-    row?.scrollIntoView({ block: "nearest" });
+    const row = rowForStop(listRef.current, selected);
+    if (row) revealWithinScroller(row);
   }, [selected]);
 
   return (
