@@ -16,10 +16,10 @@
  */
 
 import {
-  type Stop,
-  type StopCategory,
   categoryMeta,
   isStopCategory,
+  type Stop,
+  type StopCategory,
 } from "../tour/schema";
 
 /** Overpass mirrors, tried in order (the first is the canonical instance). */
@@ -33,7 +33,7 @@ export const NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search";
 
 export const DEFAULTS = {
   /** How many proposals to put in front of the user, all pre-selected. */
-  topN: 10,
+  topN: 12,
   /** Server-side budget inside the Overpass QL. */
   overpassTimeoutS: 25,
   /** Client-side abort budget for any single request. */
@@ -207,7 +207,10 @@ export function buildOverpassQuery(
 ): string {
   const timeout = opts.overpassTimeoutS ?? DEFAULTS.overpassTimeoutS;
   const b = `${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
-  const filters = ['["tourism"~"^(attraction|museum|viewpoint)$"]', '["historic"]'];
+  const filters = [
+    '["tourism"~"^(attraction|museum|viewpoint)$"]',
+    '["historic"]',
+  ];
   const parts: string[] = [];
   for (const filter of filters) {
     for (const element of ["node", "way", "relation"]) {
@@ -362,7 +365,8 @@ export function rankAndDedupe(
     .filter((c) => c.hasTitle);
 
   candidates.sort(
-    (a, b) => scoreCandidate(b) - scoreCandidate(a) || a.title.localeCompare(b.title),
+    (a, b) =>
+      scoreCandidate(b) - scoreCandidate(a) || a.title.localeCompare(b.title),
   );
 
   const kept: Candidate[] = [];

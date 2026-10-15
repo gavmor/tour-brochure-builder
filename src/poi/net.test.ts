@@ -68,8 +68,7 @@ function installHangingFetch(): void {
         fetchStartedAt = Date.now();
         const signal = init?.signal;
         if (!signal) return; // nothing can ever end this request
-        const fail = () =>
-          reject(new DOMException("aborted", "AbortError"));
+        const fail = () => reject(new DOMException("aborted", "AbortError"));
         if (signal.aborted) fail();
         else signal.addEventListener("abort", fail, { once: true });
       }),
@@ -98,7 +97,11 @@ describe("failures are reported, not swallowed", () => {
   });
 
   it("rejects on an HTTP error status", async () => {
-    installFetch(async () => ({ ok: false, status: 503, json: async () => ({}) }));
+    installFetch(async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    }));
     await expect(geocode("Boston")).rejects.toThrow(/Nominatim HTTP 503/);
   });
 
@@ -126,8 +129,12 @@ describe("failures are reported, not swallowed", () => {
   });
 
   it("describes a failure in words the UI can show", () => {
-    expect(describeError(new PoiNetworkError("timeout", "x"))).toBe("timed out");
-    expect(describeError(new PoiNetworkError("cancelled", "x"))).toBe("cancelled");
+    expect(describeError(new PoiNetworkError("timeout", "x"))).toBe(
+      "timed out",
+    );
+    expect(describeError(new PoiNetworkError("cancelled", "x"))).toBe(
+      "cancelled",
+    );
     expect(describeError(new TypeError("Failed to fetch"))).toBe(
       "Failed to fetch",
     );
@@ -142,9 +149,9 @@ describe("cancellation", () => {
       controller.abort();
       throw new DOMException("aborted", "AbortError");
     });
-    await expect(
-      findPois(BBOX, { signal: controller.signal }),
-    ).rejects.toThrow(/abort|cancel/i);
+    await expect(findPois(BBOX, { signal: controller.signal })).rejects.toThrow(
+      /abort|cancel/i,
+    );
     expect(calls).toHaveLength(1);
   });
 
@@ -154,9 +161,9 @@ describe("cancellation", () => {
       controller.abort();
       throw new DOMException("aborted", "AbortError");
     });
-    await expect(
-      findPois(BBOX, { signal: controller.signal }),
-    ).rejects.toThrow(/abort|cancel/i);
+    await expect(findPois(BBOX, { signal: controller.signal })).rejects.toThrow(
+      /abort|cancel/i,
+    );
     expect(recentOutage()).toBeNull();
   });
 });

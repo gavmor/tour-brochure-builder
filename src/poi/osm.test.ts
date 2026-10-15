@@ -40,9 +40,9 @@ describe("Overpass query", () => {
   });
 
   it("carries a server-side timeout so a huge area cannot run forever", () => {
-    expect(buildOverpassQuery({ south: 1, west: 2, north: 3, east: 4 })).toMatch(
-      /\[timeout:\d+\]/,
-    );
+    expect(
+      buildOverpassQuery({ south: 1, west: 2, north: 3, east: 4 }),
+    ).toMatch(/\[timeout:\d+\]/);
   });
 });
 
@@ -204,7 +204,13 @@ describe("ranking and dedupe", () => {
         tags: { name: "Museum X", tourism: "museum", wikidata: "Q1" },
       },
       // Unnamed: nothing to show the user but a dot.
-      { type: "node", id: 2, lat: 41.881, lon: -87.621, tags: { tourism: "attraction" } },
+      {
+        type: "node",
+        id: 2,
+        lat: 41.881,
+        lon: -87.621,
+        tags: { tourism: "attraction" },
+      },
       {
         type: "node",
         id: 3,
@@ -226,7 +232,13 @@ describe("ranking and dedupe", () => {
 
   it("collapses two differently-named points sitting on top of each other", () => {
     const kept = rankAndDedupe([
-      { type: "node", id: 1, lat: 41.88, lon: -87.62, tags: { name: "Statue" } },
+      {
+        type: "node",
+        id: 1,
+        lat: 41.88,
+        lon: -87.62,
+        tags: { name: "Statue" },
+      },
       {
         type: "node",
         id: 2,

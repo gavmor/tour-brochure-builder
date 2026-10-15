@@ -32,6 +32,9 @@ import {
   addMode,
   fitRequest,
   hiddenRouteIds,
+  nearbyCenter,
+  nearbyPinMode,
+  nearbyProposals,
   round6,
   shapeMode,
 } from "./uiState";
@@ -59,6 +62,10 @@ export function MapEditor() {
   );
   const linesRef = useRef(new Map<string, L.Polyline>());
   const viaLayerRef = useRef<L.LayerGroup | null>(null);
+  /** The "search near here" centre, drawn while the POI dialog is working. */
+  const centreMarkerRef = useRef<L.CircleMarker | null>(null);
+  /** Provisional markers for the proposals currently on the checklist. */
+  const proposalLayerRef = useRef<L.LayerGroup | null>(null);
   /** Tour id whose bounds we already fitted — refit on load, not on every edit. */
   const fittedRef = useRef<string | null>(null);
   /** Set when the map itself caused the selection, so we do not pan under the user. */
@@ -68,6 +75,9 @@ export function MapEditor() {
   const selected = selectedStopId.value;
   const hidden = hiddenRouteIds.value;
   const armed = addMode.value;
+  const pinning = nearbyPinMode.value;
+  const searchCentre = nearbyCenter.value;
+  const proposals = nearbyProposals.value;
   const shaping = shapeMode.value;
   const locked = readOnly.value;
   const activeId = activeRoute.value?.id ?? null;
@@ -101,6 +111,8 @@ export function MapEditor() {
       map.remove();
       mapRef.current = null;
       viaLayerRef.current = null;
+      centreMarkerRef.current = null;
+      proposalLayerRef.current = null;
       markers.clear();
       lines.clear();
     };
@@ -112,6 +124,17 @@ export function MapEditor() {
     if (!map) return;
 
     const onClick = (event: L.LeafletMouseEvent) => {
+      // Choosing a search centre for "Add sites near a location" wins over
+      // adding a stop: it is the mode the user armed most recently, and the
+      // two are mutually exclusive (see `openNearby`).
+      if (!locked && pinning) {
+        nearbyPinMode.value = false;
+        nearbyCenter.value = {
+          lat: round6(event.latlng.lat),
+          lng: round6(event.latlng.lng),
+        };
+        return;
+      }
       if (locked || !armed) {
         selectedStopId.value = null;
         return;
@@ -152,7 +175,61 @@ export function MapEditor() {
       map.off("click", onClick);
       map.getContainer().removeEventListener("keydown", onKeyDown);
     };
-  }, [armed, locked, activeId]);
+  }, [armed, pinning, locked, activeId]);
+
+  // ------------------------------------------------- the POI search centre
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const existing = centreMarkerRef.current;
+    if (!searchCentre) {
+      existing?.remove();
+      centreMarkerRef.current = null;
+      return;
+    }
+    const position: [number, number] = [searchCentre.lat, searchCentre.lng];
+    if (existing) {
+      existing.setLatLng(position);
+      return;
+    }
+    const marker = L.circleMarker(position, {
+      radius: 10,
+      color: "#1F3A5F",
+      weight: 2,
+      fillColor: "#1F3A5F",
+      fillOpacity: 0.25,
+      interactive: false,
+      className: "search-centre",
+    });
+    marker.addTo(map);
+    centreMarkerRef.current = marker;
+  }, [searchCentre]);
+
+  // ------------------------------------------ provisional POI proposals (§2)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    let layer = proposalLayerRef.current;
+    if (!layer) {
+      layer = L.layerGroup().addTo(map);
+      proposalLayerRef.current = layer;
+    }
+    layer.clearLayers();
+    for (const proposal of proposals) {
+      L.circleMarker([proposal.lat, proposal.lng], {
+        radius: 7,
+        color: "#1F3A5F",
+        weight: 2,
+        // Ticked proposals read as "will be added"; unticked ones as "offered".
+        fillColor: proposal.chosen ? "#1F3A5F" : "#ffffff",
+        fillOpacity: proposal.chosen ? 0.85 : 0.6,
+        interactive: true,
+        className: "poi-proposal",
+      })
+        .bindTooltip(proposal.title, { direction: "top" })
+        .addTo(layer);
+    }
+  }, [proposals]);
 
   // -------------------------------------------------------------- polylines
   useEffect(() => {
@@ -381,7 +458,11 @@ export function MapEditor() {
   }, [selected]);
 
   return (
-    <div class={`map-pane${armed && !locked ? " map-pane--adding" : ""}`}>
+    <div
+      class={`map-pane${armed && !locked ? " map-pane--adding" : ""}${
+        pinning && !locked ? " map-pane--picking" : ""
+      }`}
+    >
       {/*
         The class on the Leaflet host is static on purpose. Leaflet adds its
         own classes (`leaflet-container` and friends, which carry the layout
@@ -397,6 +478,12 @@ export function MapEditor() {
         <p class="map-pane__hint" role="status">
           Click the map to add a stop (or focus the map and press Enter to add
           one at the centre). Press <kbd>Esc</kbd> to stop adding.
+        </p>
+      ) : null}
+      {pinning && !locked ? (
+        <p class="map-pane__hint map-pane__hint--picking" role="status">
+          Click the map to choose the centre of the &ldquo;sites near a
+          location&rdquo; search.
         </p>
       ) : null}
       {shaping && !locked ? (

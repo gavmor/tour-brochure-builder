@@ -22,11 +22,11 @@
 
 import {
   type BBox,
+  buildOverpassQuery,
   type Candidate,
   clampBbox,
   DEFAULTS,
   type GeocodeResult,
-  buildOverpassQuery,
   nominatimUrl,
   OVERPASS_ENDPOINTS,
   overpassBody,
@@ -149,7 +149,10 @@ let lastNominatimAt = 0;
 /** Hold the caller until at least `nominatimMinIntervalMs` has passed. */
 function nominatimGate(): Promise<void> {
   const now = Date.now();
-  const wait = Math.max(0, lastNominatimAt + DEFAULTS.nominatimMinIntervalMs - now);
+  const wait = Math.max(
+    0,
+    lastNominatimAt + DEFAULTS.nominatimMinIntervalMs - now,
+  );
   lastNominatimAt = now + wait;
   return new Promise((resolve) => setTimeout(resolve, wait));
 }
@@ -268,12 +271,20 @@ export async function geocode(
   if (Number.isFinite(deadlineAt)) {
     const remaining = (deadlineAt as number) - Date.now();
     if (remaining <= 0) {
-      throw new PoiNetworkError("timeout", "deadline exceeded before geocoding");
+      throw new PoiNetworkError(
+        "timeout",
+        "deadline exceeded before geocoding",
+      );
     }
     budget = Math.min(DEFAULTS.fetchTimeoutMs, Math.ceil(remaining / 2));
   }
 
-  const response = await fetchWithTimeout(nominatimUrl(query), {}, budget, signal);
+  const response = await fetchWithTimeout(
+    nominatimUrl(query),
+    {},
+    budget,
+    signal,
+  );
   if (!response.ok) {
     throw new PoiNetworkError("http", `Nominatim HTTP ${response.status}`);
   }
@@ -325,7 +336,8 @@ export async function findPois(
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
       lastError =
-        lastError ?? new PoiNetworkError("timeout", "Overpass deadline exceeded");
+        lastError ??
+        new PoiNetworkError("timeout", "Overpass deadline exceeded");
       break;
     }
     // Split what is left of the shared deadline across the mirrors not yet
@@ -370,7 +382,9 @@ export async function findPois(
   }
 
   rememberOutage(lastError);
-  throw lastError ?? new PoiNetworkError("http", "every Overpass mirror failed");
+  throw (
+    lastError ?? new PoiNetworkError("http", "every Overpass mirror failed")
+  );
 }
 
 /** The real service. The UI takes this as a default so tests can swap it. */
