@@ -80,7 +80,11 @@ export function StopPanel() {
   };
 
   return (
-    <section class="stop-panel" aria-label={`Editing ${stop.title}`}>
+    <section
+      class="stop-panel"
+      aria-label={`Editing ${stop.title}`}
+      data-testid="stop-panel"
+    >
       <header class="stop-panel__header">
         <span class="stop-badge" style={{ background: color }}>
           {index}
