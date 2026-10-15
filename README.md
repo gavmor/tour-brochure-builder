@@ -15,7 +15,21 @@ pnpm typecheck    # run TypeScript type checking
 pnpm lint         # run Biome linter
 pnpm test         # run the Vitest suite once
 pnpm test:watch   # re-run tests on change
+pnpm test:e2e     # run the Playwright acceptance suite (browser, real layout)
 ```
+
+The Vitest suite runs in jsdom, which has no layout, no scrolling and no
+touch. Anything that depends on those — page scroll, tap handling, viewport
+geometry — belongs in `e2e/` instead. First run needs the browser:
+
+```
+pnpm exec playwright install chromium
+```
+
+Two projects run every spec: `desktop-chromium` (mouse, narrow window, where
+the editor stacks and the document scrolls) and `mobile-chrome` (Pixel 5 with
+touch emulation). The specs block all non-localhost requests, so tiles and the
+routing endpoints are never called from a test.
 
 ## Tour data and state (`src/tour/`)
 

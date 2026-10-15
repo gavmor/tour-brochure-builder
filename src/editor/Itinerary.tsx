@@ -42,7 +42,10 @@ export function Itinerary() {
   return (
     <section class="itinerary" aria-label="Itinerary">
       <h2 class="sidebar__heading">
-        Itinerary <span class="sidebar__count">{total} stops</span>
+        Itinerary{" "}
+        <span class="sidebar__count" data-testid="stop-count">
+          {total} stops
+        </span>
       </h2>
       {current.routes.map((route) => (
         <RouteSection key={route.id} route={route} />
@@ -132,6 +135,7 @@ function RouteSection({ route }: { route: Route }) {
             <li
               key={stop.id}
               data-stop-id={stop.id}
+              data-testid="itinerary-row"
               class={`itinerary-row${isSelected ? " itinerary-row--selected" : ""}`}
             >
               <span

@@ -141,6 +141,7 @@ export function Editor() {
           <button
             type="button"
             class={`primary${armed ? " primary--on" : ""}`}
+            data-testid="add-stop-toggle"
             disabled={locked}
             aria-pressed={armed}
             onClick={() => {
