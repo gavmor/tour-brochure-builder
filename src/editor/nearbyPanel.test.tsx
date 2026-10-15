@@ -30,6 +30,7 @@ const CHICAGO: GeocodeResult = {
 
 const TWO_SITES: PoiResult = {
   cached: false,
+  hidden: 0,
   candidates: [
     {
       osmId: "node/1",
@@ -209,6 +210,87 @@ describe("the proposal list", () => {
       "https://www.openstreetmap.org/copyright",
     );
   });
+
+  it("discloses duplicates the ranking folded away (BUG-12)", async () => {
+    mount(
+      stubService({
+        findPois: async () => ({ ...TWO_SITES, hidden: 3 }),
+      }),
+    );
+    await searchFor("Chicago");
+    expect(host.querySelector(".nearby__status")?.textContent).toMatch(
+      /3 nearby duplicates hidden/,
+    );
+  });
+
+  it("says nothing about duplicates when none were hidden", async () => {
+    mount(stubService());
+    await searchFor("Chicago");
+    expect(host.querySelector(".nearby__status")?.textContent).not.toMatch(
+      /hidden/,
+    );
+  });
+
+  it("does not claim 0 results are 'all pre-selected' (BUG-14)", async () => {
+    // Everything found is already in the tour: there is nothing to untick, so
+    // the uncheck-any-you-don't-want sentence must not appear.
+    for (const candidate of TWO_SITES.candidates) {
+      addStop({
+        lat: candidate.lat,
+        lng: candidate.lng,
+        title: candidate.title,
+      });
+    }
+    mount(stubService());
+    await searchFor("Chicago");
+
+    const status = host.querySelector(".nearby__status")?.textContent ?? "";
+    expect(rows().every((b) => !b.checked)).toBe(true);
+    expect(status).not.toMatch(/pre-selected/);
+    expect(status).not.toMatch(/uncheck any/);
+    expect(status).toMatch(/already in your tour/);
+  });
+
+  it("does not mark an unrelated neighbour as 'Already added' (BUG-12)", async () => {
+    // "SkyDeck Chicago Willis Tower" is 44 m from the starter's "Willis Tower
+    // Skydeck" and is the same site; "The Ledge" is 35 m away and is not.
+    addStop({ lat: 41.878876, lng: -87.635915, title: "Willis Tower Skydeck" });
+    mount(
+      stubService({
+        findPois: async () => ({
+          cached: false,
+          hidden: 0,
+          candidates: [
+            {
+              osmId: "node/10",
+              title: "SkyDeck Chicago Willis Tower",
+              lat: 41.878876,
+              lng: -87.635915,
+              category: "viewpoint" as const,
+              blurb: "Viewpoint",
+              hasWiki: true,
+            },
+            {
+              osmId: "node/11",
+              title: "The Ledge",
+              lat: 41.878565,
+              lng: -87.63589,
+              category: "attraction" as const,
+              blurb: "Attraction",
+              hasWiki: false,
+            },
+          ],
+        }),
+      }),
+    );
+    await searchFor("Chicago");
+
+    const boxes = rows();
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].checked).toBe(false); // the same Skydeck, under another name
+    expect(boxes[1].checked).toBe(true); // a different site on the same floor
+    expect(byText("button", "Add 1 stop")).toBeTruthy();
+  });
 });
 
 describe("accepting proposals", () => {
@@ -307,14 +389,17 @@ describe("the fallback path (epic item 5)", () => {
         findPois: async (): Promise<PoiResult> => ({
           candidates: [],
           cached: false,
+          hidden: 0,
         }),
       }),
     );
     await searchFor("Chicago");
     expect(rows().length).toBeGreaterThan(0);
-    expect(host.querySelector(".nearby__status")?.textContent).toMatch(
-      /No notable sites/,
-    );
+    const status = host.querySelector(".nearby__status")?.textContent ?? "";
+    expect(status).toMatch(/No notable sites/);
+    // And it says how far it actually looked, rather than asserting that
+    // nothing exists near the place (BUG-10).
+    expect(status).toMatch(/within [\d.]+ ?(m|km) of Chicago/);
   });
 
   it("curated proposals become stops the same way live ones do", async () => {

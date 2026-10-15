@@ -89,11 +89,28 @@ const tourSchema = z.object({
     .optional(),
 });
 
+/**
+ * Which identifying fields the input genuinely carried, as opposed to ones
+ * `parseTour` had to invent. Empty means nothing about the input said "tour".
+ */
+export type TourField = "id" | "title" | "routes";
+
 export interface ParseOk {
   ok: true;
   tour: Tour;
   /** Non-fatal repairs applied, in the order they happened. */
   warnings: string[];
+  /**
+   * The identifying fields that were present and usable in the input.
+   *
+   * `parseTour` repairs aggressively by design, which means it turns *any*
+   * JSON object into a valid empty tour — `{"hello":"world"}` included. That
+   * is right for a file the user deliberately opened, and wrong for a `#t=`
+   * payload, where it silently replaces the curated starter with a blank tour
+   * and no notice. Callers that need to tell "a tour" from "an object" ask
+   * this (see `isUnrecognisedTour`); nothing else changes.
+   */
+  recognised: TourField[];
   /** Set when the input used an older schema version. */
   migratedFrom?: number;
 }
@@ -394,6 +411,7 @@ export function parseTour(input: unknown): ParseResult {
 
   const warnings: string[] = [];
   const warn = (m: string) => warnings.push(m);
+  const recognised: TourField[] = [];
 
   let raw = input;
   let migratedFrom: number | undefined;
@@ -406,9 +424,11 @@ export function parseTour(input: unknown): ParseResult {
   }
 
   const id = cleanString(raw.id);
-  if (!id) warn("Tour was missing an id; generated one.");
+  if (id) recognised.push("id");
+  else warn("Tour was missing an id; generated one.");
   const title = cleanString(raw.title);
-  if (!title) warn('Tour was missing a title; used "Untitled tour".');
+  if (title) recognised.push("title");
+  else warn('Tour was missing a title; used "Untitled tour".');
 
   const rawRoutes = Array.isArray(raw.routes) ? raw.routes : [];
   if (!Array.isArray(raw.routes))
@@ -419,6 +439,9 @@ export function parseTour(input: unknown): ParseResult {
     const route = repairRoute(rawRoute, i, warn);
     if (route) routes.push(route);
   });
+  // An array of routes only counts as a recognised field if at least one of
+  // them survived repair — `routes: []` identifies nothing.
+  if (routes.length > 0) recognised.push("routes");
   if (routes.length === 0) {
     routes.push(createRoute());
     warn("Tour had no usable routes; started an empty default route.");
@@ -454,8 +477,21 @@ export function parseTour(input: unknown): ParseResult {
   }
 
   return migratedFrom === undefined
-    ? { ok: true, tour, warnings }
-    : { ok: true, tour, warnings, migratedFrom };
+    ? { ok: true, tour, warnings, recognised }
+    : { ok: true, tour, warnings, recognised, migratedFrom };
+}
+
+/**
+ * True when a parse succeeded only because every identifying field was
+ * invented: no id, no title, no usable route. The result is a valid empty
+ * tour, but the input was not a tour — `{"hello":"world"}` parses this way.
+ *
+ * Used to stop a junk `#t=` payload from taking over the app (it loaded a
+ * blank "Untitled tour", suppressed the curated starter, and then overwrote
+ * the address bar so the original link could not even be retried).
+ */
+export function isUnrecognisedTour(result: ParseResult): boolean {
+  return result.ok && result.recognised.length === 0;
 }
 
 /** `parseTour` over a JSON string. Never throws. */

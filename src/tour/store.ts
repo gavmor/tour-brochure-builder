@@ -37,7 +37,12 @@ import {
   replaceLocationHash,
   type ShareLink,
 } from "./urlShare";
-import { type ParseResult, parseTour, serializeTour } from "./validate";
+import {
+  isUnrecognisedTour,
+  type ParseResult,
+  parseTour,
+  serializeTour,
+} from "./validate";
 
 /** The working tour. Treat as read-only outside this module. */
 export const tour = signal<Tour>(createTour());
@@ -478,6 +483,14 @@ export interface InitResult {
 }
 
 /**
+ * What the UI is told when a `#t=` payload decoded cleanly but described no
+ * tour at all. Kept as a constant so the bootstrap and the hash watcher say
+ * the same thing, and tests can assert on it.
+ */
+export const NOT_A_TOUR_ERROR =
+  "That link did not contain a tour; opened the starter tour instead.";
+
+/**
  * Apply a hash fragment to the store. Returns the parse result when the hash
  * carried a tour, or null when it carried none.
  */
@@ -488,6 +501,13 @@ export function applyHash(hash: string): ParseResult | null {
   if (!decoded.ok) {
     lastLoadNotice.value = { warnings: [], errors: decoded.errors };
     return decoded;
+  }
+  // Decoded, repairable, and still not a tour: treat it like a corrupt link
+  // rather than letting it blank the app (see `isUnrecognisedTour`).
+  if (isUnrecognisedTour(decoded)) {
+    resetToFallback();
+    lastLoadNotice.value = { warnings: [], errors: [NOT_A_TOUR_ERROR] };
+    return { ok: false, errors: [NOT_A_TOUR_ERROR] };
   }
   loadTour(decoded.tour, { readOnly: state.view });
   return decoded;
@@ -601,16 +621,17 @@ export function initStore(
 
   if (hash.encoded) {
     const decoded = decodeTour(hash.encoded);
-    if (decoded.ok) {
+    if (decoded.ok && !isUnrecognisedTour(decoded)) {
       loadTour(decoded.tour, { readOnly: hash.view });
       result.source = "url";
       result.readOnly = hash.view;
       result.warnings = decoded.warnings;
       return finish();
     }
-    // A corrupt payload is not worth stranding the user over: fall through to
-    // the starter, and let the URL writer replace the broken hash.
-    result.errors.push(...decoded.errors);
+    // Neither a corrupt payload nor a decodable one that turned out not to be
+    // a tour is worth stranding the user over: fall through to the starter,
+    // and let the URL writer replace the broken hash.
+    result.errors.push(...(decoded.ok ? [NOT_A_TOUR_ERROR] : decoded.errors));
   }
 
   result.source = hydrateFallback(result);
