@@ -159,10 +159,17 @@ first 80 characters of `description` at the nearest word boundary.
             ^ fold                      ^ fold
 ```
 
-- `@page { size: letter landscape; margin: 0.35in; }`
+- `@page { size: letter landscape; margin: 0; }` — the brochure prints **full bleed**:
+  the content box *is* the sheet, and the map, the cream itinerary panel and every
+  background fill run to all four edges. The three fold panels are exact thirds of
+  the 11 in width (`calc(11in / 3)` = 3.667 in), so the folds fall at 3.667 in and
+  7.333 in and the second fold is the map/itinerary boundary.
+  True edge-to-edge output still depends on the printer — see README → Printing.
 - Map is `height: 100%` of the content box, `break-inside: avoid`.
 - OSM attribution sits bottom-right **inside** the map panel and must survive printing —
-  it is a tile-licence obligation, not decoration.
+  it is a tile-licence obligation, not decoration. At zero page margin it is held
+  `--bleed-safe` (0.22 in) off the trim so a non-printable hardware margin cannot
+  clip it.
 - Fold-safety: keep no text within 0.2 in of either fold line at x = 3.67 in and 7.33 in.
   The map tolerates folds; the itinerary column must not straddle one.
 - The reference's bottom photo strip is **out of scope for v1** (see §5).

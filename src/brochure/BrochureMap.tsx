@@ -129,6 +129,10 @@ export function BrochureMap() {
      * a frame), so this re-measures the container, refits the stops into the
      * new shape and waits for that box's tiles — the fix for SPEC §6's
      * half-grey map.
+     *
+     * At full bleed the print box is the whole left two-thirds of the sheet
+     * (7.333in × 8.5in, ~14 % more area than the old margined box), so the
+     * tile wait is given a little more room before it gives up and warns.
      */
     const prepare = async (): Promise<SettleOutcome> => {
       const map = mapRef.current;
@@ -136,7 +140,7 @@ export function BrochureMap() {
       map.invalidateSize({ animate: false });
       fitToTour(map, tour.peek());
       const settled = await whenTilesSettled(tileLayerRef.current, {
-        timeout: 8000,
+        timeout: 10000,
       });
       return settled;
     };
