@@ -11,20 +11,26 @@ import { describe, expect, it } from "vitest";
 import { addStop, resetStore, tour } from "../tour";
 import { createStop, stopCategory } from "../tour/schema";
 import {
+  type BBox,
   bboxFromCenter,
+  bboxRadiusMeters,
   blurbFromTags,
   buildOverpassQuery,
   candidateToStopInit,
   categoryFromTags,
   clampBbox,
+  DEFAULTS,
   descriptionFromTags,
   elementToCandidate,
+  formatDistance,
   hasWikiTag,
   haversineMeters,
+  isSameSite,
   normalizeTitle,
   parseNominatim,
   rankAndDedupe,
   sessionCacheKey,
+  titlesLikelySameSite,
 } from "./osm";
 
 describe("Overpass query", () => {
@@ -47,7 +53,7 @@ describe("Overpass query", () => {
 });
 
 describe("Nominatim parsing", () => {
-  it("maps lat/lon and the [south,north,west,east] bbox", () => {
+  it("maps lat/lon and clamps the bbox around the point it returned", () => {
     const result = parseNominatim([
       {
         lat: "41.87",
@@ -59,13 +65,56 @@ describe("Nominatim parsing", () => {
     expect(result).not.toBeNull();
     expect(result?.lat).toBe(41.87);
     expect(result?.lng).toBe(-87.62);
-    expect(result?.bbox).toEqual({
-      south: 41.64,
-      north: 42.02,
-      west: -87.94,
-      east: -87.52,
-    });
+    // Not the raw Nominatim box: clamped to one query's worth, centred on the
+    // point rather than the box's lopsided midpoint (BUG-11).
+    const bbox = result?.bbox as BBox;
+    expect((bbox.north + bbox.south) / 2).toBeCloseTo(41.87, 6);
+    expect((bbox.east + bbox.west) / 2).toBeCloseTo(-87.62, 6);
+    expect(bbox.north - bbox.south).toBeLessThanOrEqual(0.1001);
     expect(result?.displayName).toBe("Chicago");
+  });
+
+  it("does not search a city at the midpoint of its bounding box (BUG-11)", () => {
+    // The live numbers: Nominatim answered `Chicago` with the point
+    // 41.87556,-87.62442 and a box whose midpoint is 41.83379,-87.73211 —
+    // 10.06 km away, out in Archer Heights. Every proposal came from there
+    // and not one Loop landmark was offered.
+    const result = parseNominatim([
+      {
+        lat: "41.87556",
+        lon: "-87.62442",
+        boundingbox: ["41.78", "41.8876", "-87.7877", "-87.6765"],
+        display_name: "Chicago",
+      },
+    ]);
+    const bbox = result?.bbox as BBox;
+    const centre = {
+      lat: (bbox.north + bbox.south) / 2,
+      lng: (bbox.east + bbox.west) / 2,
+    };
+    expect(
+      haversineMeters(centre, { lat: 41.87556, lng: -87.62442 }),
+    ).toBeLessThan(1);
+  });
+
+  it("floors a point-like match at the default radius (BUG-10)", () => {
+    // "Navy Pier, Chicago" matched "Navy Pier (River Route), Lakefront Trail
+    // Connector": a 0.01 km x 0.01 km box, over which Overpass returned zero
+    // elements — so the app claimed nothing was mapped at Navy Pier.
+    const result = parseNominatim([
+      {
+        lat: "41.89058",
+        lon: "-87.61221",
+        boundingbox: ["41.89053", "41.89063", "-87.61226", "-87.61216"],
+        display_name: "Navy Pier (River Route)",
+      },
+    ]);
+    const bbox = result?.bbox as BBox;
+    expect(bboxRadiusMeters(bbox)).toBeGreaterThanOrEqual(
+      DEFAULTS.radiusMeters - 1,
+    );
+    expect(bbox.south).toBeLessThan(41.89058);
+    expect(bbox.north).toBeGreaterThan(41.89058);
   });
 
   it("falls back to a radius bbox when Nominatim omits one", () => {
@@ -91,10 +140,47 @@ describe("bbox helpers", () => {
     expect((clamped.east + clamped.west) / 2).toBeCloseTo(-87.5, 6);
   });
 
-  it("leaves a small bbox alone", () => {
-    const small = { south: 41.87, north: 41.89, west: -87.64, east: -87.62 };
+  it("clamps around an explicit centre, not the box midpoint", () => {
+    const clamped = clampBbox(
+      { south: 40, north: 43, west: -89, east: -86 },
+      { center: { lat: 41.87556, lng: -87.62442 } },
+    );
+    expect((clamped.north + clamped.south) / 2).toBeCloseTo(41.87556, 6);
+    expect((clamped.east + clamped.west) / 2).toBeCloseTo(-87.62442, 6);
+  });
+
+  it("widens a box too small to hold anything up to the default radius", () => {
+    const pinhead = {
+      south: 41.89053,
+      north: 41.89063,
+      west: -87.61226,
+      east: -87.61216,
+    };
+    const clamped = clampBbox(pinhead);
+    expect(bboxRadiusMeters(clamped)).toBeGreaterThanOrEqual(
+      DEFAULTS.radiusMeters - 1,
+    );
+  });
+
+  it("leaves a box that is already between the floor and the cap alone", () => {
+    const small = { south: 41.85, north: 41.91, west: -87.66, east: -87.6 };
     const clamped = clampBbox(small);
-    expect(clamped.north - clamped.south).toBeCloseTo(0.02, 6);
+    expect(clamped.north - clamped.south).toBeCloseTo(0.06, 6);
+    expect(clamped.east - clamped.west).toBeCloseTo(0.06, 6);
+  });
+
+  it("never lets the floor push a box past the server-side cap", () => {
+    const clamped = clampBbox(
+      { south: 41.88, north: 41.88, west: -87.63, east: -87.63 },
+      { minRadiusMeters: 50_000 },
+    );
+    expect(clamped.north - clamped.south).toBeLessThanOrEqual(0.1001);
+  });
+
+  it("says how far a box reaches, in words", () => {
+    expect(formatDistance(1500)).toBe("1.5 km");
+    expect(formatDistance(11_130)).toBe("11 km");
+    expect(formatDistance(800)).toBe("800 m");
   });
 
   it("centres the bbox it builds from a dropped pin", () => {
@@ -163,6 +249,79 @@ describe("tag mapping", () => {
   });
 });
 
+describe("what counts as the same site", () => {
+  // The distinct-name sites the old proximity-only rule suppressed on a live
+  // 1.5 km box over the Loop, with the name that swallowed each.
+  const measuredFalseCollapses: [string, string][] = [
+    ["Vietnam Veterans Memorial", "Heald Square Monument"],
+    ["The Ledge", "SkyDeck Chicago Willis Tower"],
+    ["Color Factory", "SkyDeck Chicago Willis Tower"],
+    ["Carousel", "Centennial Wheel"],
+    ["Drop Tower", "Centennial Wheel"],
+    ["Tea Cups", "Centennial Wheel"],
+    ["Wave Swinger", "Centennial Wheel"],
+    ["Light Tower", "Centennial Wheel"],
+    ["Pier Park Mini-Golf", "Centennial Wheel"],
+    ["Site of Fort Dearborn", "McCormick Bridgehouse & Chicago River Museum"],
+    ["Chicago Board of Trade Building Museum", "Money Museum"],
+    ["Flyover", "Chicago Children's Museum"],
+    ["Old Post Office Site", "Site of the Sauganash Hotel/Wigwam"],
+    ["Oscar O. D'Angelo Park", "Grand Central Station"],
+  ];
+
+  it.each(measuredFalseCollapses)("keeps %s apart from %s (BUG-12)", (a, b) => {
+    expect(titlesLikelySameSite(a, b)).toBe(false);
+  });
+
+  const measuredRealDuplicates: [string, string][] = [
+    ["Art Institute of Chicago", "Art Institute of Chicago"],
+    ["Willis Tower", "Willis Tower Skydeck"],
+    ["Cloud Gate", "Cloud Gate (The Bean)"],
+  ];
+
+  it.each(measuredRealDuplicates)("collapses %s into %s", (a, b) => {
+    expect(titlesLikelySameSite(a, b)).toBe(true);
+  });
+
+  it("needs both proximity and name affinity, never one alone", () => {
+    const ledge = { title: "The Ledge", lat: 41.878565, lng: -87.63589 };
+    const skydeck = {
+      title: "SkyDeck Chicago Willis Tower",
+      lat: 41.878876,
+      lng: -87.635915,
+    };
+    // 35 m apart, unrelated names: two sites.
+    expect(haversineMeters(ledge, skydeck)).toBeLessThan(60);
+    expect(isSameSite(ledge, skydeck)).toBe(false);
+
+    // Related names but kilometres apart: also two sites.
+    expect(
+      isSameSite(
+        { title: "Willis Tower", lat: 41.8788, lng: -87.6359 },
+        { title: "Willis Tower Skydeck", lat: 41.95, lng: -87.6359 },
+      ),
+    ).toBe(false);
+  });
+
+  it("matches on name at any distance, as it always did", () => {
+    expect(
+      isSameSite(
+        { title: "Buckingham Fountain", lat: 41.8758, lng: -87.6189 },
+        { title: "buckingham fountain", lat: 41.8759, lng: -87.6188 },
+      ),
+    ).toBe(true);
+  });
+
+  it("never calls two unnamed things the same site", () => {
+    expect(
+      isSameSite(
+        { title: "", lat: 41.88, lng: -87.62 },
+        { title: "", lat: 41.88, lng: -87.62 },
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("element -> candidate", () => {
   it("reads a node's own point and a way's `out center` point", () => {
     const node = elementToCandidate({
@@ -227,27 +386,96 @@ describe("ranking and dedupe", () => {
       },
     ];
     const kept = rankAndDedupe(elements, { topN: 10 });
-    expect(kept.map((c) => c.title)).toEqual(["Museum X", "Plain Park"]);
+    expect(kept.candidates.map((c) => c.title)).toEqual([
+      "Museum X",
+      "Plain Park",
+    ]);
+    expect(kept.hidden).toBe(1);
   });
 
-  it("collapses two differently-named points sitting on top of each other", () => {
+  it("keeps two differently-named sites that happen to be neighbours (BUG-12)", () => {
+    // Measured on a live 1.5 km box over the Loop, collapsing on distance
+    // alone threw away 17 distinct sites: "The Ledge" and "Color Factory"
+    // vanished into "SkyDeck Chicago Willis Tower", and the whole of Navy
+    // Pier's funfair vanished into "Centennial Wheel". 32-56 m apart is a
+    // city block, not a duplicate.
+    const kept = rankAndDedupe([
+      {
+        type: "node",
+        id: 1,
+        lat: 41.878876,
+        lon: -87.635915,
+        tags: { name: "SkyDeck Chicago Willis Tower", tourism: "attraction" },
+      },
+      {
+        type: "node",
+        id: 2,
+        lat: 41.878565,
+        lon: -87.63589,
+        tags: { name: "The Ledge", tourism: "attraction" },
+      },
+      {
+        type: "node",
+        id: 3,
+        lat: 41.879,
+        lon: -87.635975,
+        tags: { name: "Color Factory", tourism: "attraction" },
+      },
+    ]);
+    expect(kept.candidates.map((c) => c.title)).toEqual([
+      "Color Factory",
+      "SkyDeck Chicago Willis Tower",
+      "The Ledge",
+    ]);
+    expect(kept.hidden).toBe(0);
+  });
+
+  it("still collapses one site mapped twice under near-identical names", () => {
+    // What the proximity rule is actually for: OSM carrying the same thing as
+    // a node and a way, where the names agree or one contains the other.
     const kept = rankAndDedupe([
       {
         type: "node",
         id: 1,
         lat: 41.88,
         lon: -87.62,
-        tags: { name: "Statue" },
+        tags: { name: "Willis Tower", tourism: "attraction" },
       },
       {
-        type: "node",
+        type: "way",
         id: 2,
-        lat: 41.880001,
-        lon: -87.620001,
-        tags: { name: "Memorial" },
+        center: { lat: 41.880001, lon: -87.620001 },
+        tags: { name: "Willis Tower Skydeck", tourism: "viewpoint" },
       },
     ]);
-    expect(kept).toHaveLength(1);
+    expect(kept.candidates).toHaveLength(1);
+    expect(kept.hidden).toBe(1);
+  });
+
+  it("reports what it hid, so the UI never drops a result silently", () => {
+    const kept = rankAndDedupe([
+      {
+        type: "node",
+        id: 1,
+        lat: 41.88,
+        lon: -87.62,
+        tags: { name: "Art Institute of Chicago", tourism: "museum" },
+      },
+      {
+        type: "way",
+        id: 2,
+        center: { lat: 41.880002, lon: -87.620002 },
+        tags: { name: "Art Institute of Chicago", tourism: "museum" },
+      },
+      {
+        type: "relation",
+        id: 3,
+        center: { lat: 41.880003, lon: -87.620003 },
+        tags: { name: "Art Institute of Chicago", tourism: "museum" },
+      },
+    ]);
+    expect(kept.candidates).toHaveLength(1);
+    expect(kept.hidden).toBe(2);
   });
 
   it("respects topN", () => {
@@ -258,12 +486,12 @@ describe("ranking and dedupe", () => {
       lon: -87 - i * 0.01,
       tags: { name: `Site ${i}`, tourism: "attraction" },
     }));
-    expect(rankAndDedupe(elements, { topN: 10 })).toHaveLength(10);
+    expect(rankAndDedupe(elements, { topN: 10 }).candidates).toHaveLength(10);
   });
 
   it("survives a null/empty element list", () => {
-    expect(rankAndDedupe(null)).toEqual([]);
-    expect(rankAndDedupe([])).toEqual([]);
+    expect(rankAndDedupe(null)).toEqual({ candidates: [], hidden: 0 });
+    expect(rankAndDedupe([])).toEqual({ candidates: [], hidden: 0 });
   });
 
   it("leaves no OSM bookkeeping on the proposals it returns", () => {
@@ -275,7 +503,7 @@ describe("ranking and dedupe", () => {
         lon: -87.62,
         tags: { name: "Museum X", tourism: "museum" },
       },
-    ]);
+    ]).candidates;
     expect(candidate).not.toHaveProperty("tags");
     expect(candidate).not.toHaveProperty("hasTitle");
   });

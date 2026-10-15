@@ -21,6 +21,7 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import {
   bboxFromCenter,
+  bboxRadiusMeters,
   type Candidate,
   CURATED_SET_LABEL,
   candidateToStopInit,
@@ -29,8 +30,9 @@ import {
   DEFAULTS,
   describeError,
   forgetOutage,
-  haversineMeters,
+  formatDistance,
   isCancellation,
+  isSameSite,
   type PoiService,
   poiService,
 } from "../poi";
@@ -152,16 +154,13 @@ export function NearbyPanel({ service = poiService }: NearbyPanelProps = {}) {
   }
 
   /**
-   * Is this proposal already a stop in the tour? Same dedupe rule the ranking
-   * uses: within `proximityMeters`, or the same title.
+   * Is this proposal already a stop in the tour? Same rule the ranking uses
+   * (`isSameSite`), so the list and the tour cannot disagree about what counts
+   * as the same site — in particular, a neighbour 40 m away with an unrelated
+   * name is *not* "Already added".
    */
   function alreadyInTour(candidate: Candidate): boolean {
-    const title = candidate.title.trim().toLowerCase();
-    return eachStop(tour.value).some(
-      ({ stop }) =>
-        stop.title.trim().toLowerCase() === title ||
-        haversineMeters(stop, candidate) <= DEFAULTS.proximityMeters,
-    );
+    return eachStop(tour.value).some(({ stop }) => isSameSite(stop, candidate));
   }
 
   /** Offer the curated set instead of leaving the user with nothing. */
@@ -182,7 +181,7 @@ export function NearbyPanel({ service = poiService }: NearbyPanelProps = {}) {
     });
   }
 
-  function propose(list: Candidate[], cached: boolean): void {
+  function propose(list: Candidate[], cached: boolean, hidden: number): void {
     const fresh = list.filter((c) => !alreadyInTour(c));
     const duplicates = list.length - fresh.length;
     setCandidates(list);
@@ -191,15 +190,27 @@ export function NearbyPanel({ service = poiService }: NearbyPanelProps = {}) {
     setChosen(new Set(fresh.map((c) => c.osmId)));
     setFallback(false);
     setPhase("proposed");
+    // "all pre-selected — uncheck any you don't want" is nonsense when nothing
+    // was pre-selected, so that sentence only exists when there is something
+    // to uncheck.
+    const headline =
+      fresh.length === 0
+        ? `Every site found here (${list.length}) is already in your tour — tick one to add it again.`
+        : `${fresh.length} site${fresh.length === 1 ? "" : "s"} proposed, all pre-selected — ` +
+          `uncheck any you don't want.` +
+          (duplicates > 0
+            ? ` ${duplicates} already in your tour ${duplicates === 1 ? "is" : "are"} listed unticked.`
+            : "");
     setStatus({
       text:
-        `${fresh.length} site${fresh.length === 1 ? "" : "s"} proposed, all pre-selected — ` +
-        `uncheck any you don't want.` +
-        (duplicates > 0
-          ? ` ${duplicates} already in your tour ${duplicates === 1 ? "is" : "are"} listed unticked.`
+        headline +
+        // Never drop results silently: say how many near-identical entries
+        // were folded into the ones on screen.
+        (hidden > 0
+          ? ` ${hidden} nearby duplicate${hidden === 1 ? "" : "s"} hidden.`
           : "") +
         (cached ? " (from this session's cache)" : ""),
-      tone: "ok",
+      tone: fresh.length === 0 ? "warn" : "ok",
     });
   }
 
@@ -226,10 +237,14 @@ export function NearbyPanel({ service = poiService }: NearbyPanelProps = {}) {
       });
       if (controller.signal.aborted) return;
       if (result.candidates.length === 0) {
-        offerCurated("No notable sites are mapped there.");
+        offerCurated(
+          `No notable sites are mapped within ${formatDistance(
+            bboxRadiusMeters(request.bbox),
+          )} of ${request.label}.`,
+        );
         return;
       }
-      propose(result.candidates, result.cached);
+      propose(result.candidates, result.cached, result.hidden);
     } catch (error) {
       if (isCancellation(error) || controller.signal.aborted) {
         setPhase("idle");
@@ -292,10 +307,14 @@ export function NearbyPanel({ service = poiService }: NearbyPanelProps = {}) {
       });
       if (poiController.signal.aborted) return;
       if (result.candidates.length === 0) {
-        offerCurated(`No notable sites are mapped near ${place}.`);
+        offerCurated(
+          `No notable sites are mapped within ${formatDistance(
+            bboxRadiusMeters(found.bbox),
+          )} of ${place}.`,
+        );
         return;
       }
-      propose(result.candidates, result.cached);
+      propose(result.candidates, result.cached, result.hidden);
     } catch (error) {
       if (isCancellation(error) || poiController.signal.aborted) {
         setPhase("idle");

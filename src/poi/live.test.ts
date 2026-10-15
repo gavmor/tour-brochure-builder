@@ -16,11 +16,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  bboxRadiusMeters,
   clearPoiCache,
   DEFAULTS,
   findPois,
   forgetOutage,
+  formatDistance,
   geocode,
+  haversineMeters,
   resetNominatimGate,
 } from "./index";
 
@@ -58,4 +61,70 @@ describe.skipIf(!LIVE)("live OSM services", () => {
       `[live] ${result.candidates.length} sites from ${result.endpoint} in ${elapsed} ms`,
     );
   }, 40_000);
+
+  /**
+   * The three searches task t_cde077ad was filed for (BUG-10, BUG-11). Each
+   * went through geocode -> findPois on the live services and came back wrong
+   * in a way no unit test could see, because the defect was in the *shape of
+   * the box* the two steps hand to each other.
+   */
+  describe.each([
+    { place: "Navy Pier, Chicago", bug: "BUG-10" },
+    { place: "Willis Tower, Chicago", bug: "BUG-10" },
+    { place: "Chicago", bug: "BUG-11" },
+  ])("$place ($bug)", ({ place }) => {
+    // Nominatim only: this is the regression itself, and it does not depend on
+    // an Overpass mirror being healthy.
+    it("builds a usable search box around the geocoded point", async () => {
+      clearPoiCache();
+      resetNominatimGate();
+      const found = await geocode(place, {
+        deadlineAt: Date.now() + DEFAULTS.proposalDeadlineMs,
+      });
+
+      // BUG-11: the box must sit on the point Nominatim returned, not on the
+      // midpoint of its bounding box (measured 10.06 km away for "Chicago").
+      const centre = {
+        lat: (found.bbox.north + found.bbox.south) / 2,
+        lng: (found.bbox.east + found.bbox.west) / 2,
+      };
+      expect(haversineMeters(centre, found)).toBeLessThan(1);
+
+      // BUG-10: and it must be wide enough to contain anything at all — the
+      // match for "Navy Pier, Chicago" is a 10 m box over a trail connector.
+      expect(bboxRadiusMeters(found.bbox)).toBeGreaterThanOrEqual(
+        DEFAULTS.radiusMeters - 1,
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        `[live] ${place}: "${found.displayName}" -> ` +
+          `${formatDistance(bboxRadiusMeters(found.bbox))} box on the point`,
+      );
+    }, 60_000);
+
+    // The other half, end to end. Subject to the same caveat as every test in
+    // this file: a failure here means the mirrors would not answer, which is
+    // what the curated fallback exists for.
+    it("finds real sites in that box", async () => {
+      clearPoiCache();
+      forgetOutage();
+      resetNominatimGate();
+      const found = await geocode(place, {
+        deadlineAt: Date.now() + DEFAULTS.proposalDeadlineMs,
+      });
+      const result = await findPois(found.bbox, {
+        deadlineAt: Date.now() + DEFAULTS.proposalDeadlineMs * 3,
+      });
+      expect(result.candidates.length).toBeGreaterThan(0);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[live] ${place}: ${result.candidates.length} proposed, ` +
+          `${result.hidden} hidden — ` +
+          result.candidates
+            .slice(0, 6)
+            .map((c) => c.title)
+            .join(", "),
+      );
+    }, 120_000);
+  });
 });

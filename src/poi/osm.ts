@@ -38,7 +38,17 @@ export const DEFAULTS = {
   overpassTimeoutS: 25,
   /** Client-side abort budget for any single request. */
   fetchTimeoutMs: 10_000,
-  /** Radius used when the user drops a centre pin instead of naming a place. */
+  /**
+   * The narrowest any search box may be, whoever built it.
+   *
+   * This is a *floor*, not just the drop-a-pin radius. Nominatim's bounding
+   * box for a named place describes the feature's own footprint, which for a
+   * point-like match can be metres across ("Navy Pier (River Route)" came back
+   * as a 10 m x 10 m box, and Overpass found nothing inside it). Searching
+   * that literally produces "no notable sites are mapped here" for a place
+   * ringed by museums, so every box is widened to at least this radius around
+   * the point the user actually asked about.
+   */
   radiusMeters: 1500,
   /** Two results closer than this are treated as the same site. */
   proximityMeters: 60,
@@ -141,23 +151,79 @@ export function bboxFromCenter(
 }
 
 /**
- * A city bbox from Nominatim can span a whole metro area; a single Overpass
- * query over that is both slow and rude — measured against the canonical
- * instance, 0.25° of Porto was refused with a server-side timeout after ~9 s,
- * while 0.10° (~11 km across, which is as far as anyone walks a brochure tour)
- * came back in under 3 s. Clamp around the centre.
+ * Narrow a search box to something one Overpass query can serve, *and* widen
+ * it to something that can plausibly contain a site.
+ *
+ * Two independent limits, both measured:
+ *
+ * - **Maximum.** A city bbox from Nominatim can span a whole metro area; a
+ *   single Overpass query over that is both slow and rude — against the
+ *   canonical instance, 0.25° of Porto was refused with a server-side timeout
+ *   after ~9 s, while 0.10° (~11 km across, which is as far as anyone walks a
+ *   brochure tour) came back in under 3 s.
+ * - **Minimum.** `DEFAULTS.radiusMeters`, so a point-like Nominatim match is
+ *   not searched as a 10 m box. See the note on that constant.
+ *
+ * `center` is the point the clamp is applied around. Pass the geocoded point:
+ * clamping around the *midpoint of the bounding box* instead moves the search
+ * wherever the feature's footprint happens to be lopsided — measured, a plain
+ * `Chicago` search landed 10.06 km from the point Nominatim returned, out in
+ * Archer Heights, and proposed nothing in the Loop. Defaults to the box's own
+ * midpoint for callers that have no better point (a box is all they have).
  */
-export function clampBbox(bbox: BBox, maxSpanDeg = 0.1): BBox {
-  const cLat = (bbox.south + bbox.north) / 2;
-  const cLng = (bbox.west + bbox.east) / 2;
-  const halfLat = Math.min((bbox.north - bbox.south) / 2, maxSpanDeg / 2);
-  const halfLng = Math.min((bbox.east - bbox.west) / 2, maxSpanDeg / 2);
+export function clampBbox(
+  bbox: BBox,
+  opts: {
+    center?: { lat: number; lng: number };
+    maxSpanDeg?: number;
+    minRadiusMeters?: number;
+  } = {},
+): BBox {
+  const maxSpanDeg = opts.maxSpanDeg ?? 0.1;
+  const minRadiusMeters = opts.minRadiusMeters ?? DEFAULTS.radiusMeters;
+  const cLat = opts.center?.lat ?? (bbox.south + bbox.north) / 2;
+  const cLng = opts.center?.lng ?? (bbox.west + bbox.east) / 2;
+
+  const floor = bboxFromCenter(cLat, cLng, minRadiusMeters);
+  // Order matters: widen to the floor, then let the server-side maximum have
+  // the last word, so a floor larger than the cap can never produce a box the
+  // mirrors will refuse.
+  const halfLat = Math.min(
+    Math.max((bbox.north - bbox.south) / 2, (floor.north - floor.south) / 2),
+    maxSpanDeg / 2,
+  );
+  const halfLng = Math.min(
+    Math.max((bbox.east - bbox.west) / 2, (floor.east - floor.west) / 2),
+    maxSpanDeg / 2,
+  );
   return {
     south: cLat - halfLat,
     north: cLat + halfLat,
     west: cLng - halfLng,
     east: cLng + halfLng,
   };
+}
+
+/**
+ * Roughly how far from its centre a box reaches, so the UI can say what was
+ * actually searched instead of asserting "nothing is mapped near here".
+ */
+export function bboxRadiusMeters(bbox: BBox): number {
+  const lat = (bbox.south + bbox.north) / 2;
+  const halfLat = ((bbox.north - bbox.south) / 2) * 111_320;
+  const halfLng =
+    ((bbox.east - bbox.west) / 2) *
+    111_320 *
+    Math.max(0.01, Math.cos((lat * Math.PI) / 180));
+  return Math.max(halfLat, halfLng);
+}
+
+/** A distance a person would say out loud: "800 m", "1.5 km", "11 km". */
+export function formatDistance(meters: number): string {
+  if (!Number.isFinite(meters) || meters <= 0) return "0 m";
+  if (meters < 1000) return `${Math.round(meters / 50) * 50} m`;
+  const km = meters / 1000;
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
 
 // --------------------------------------------------------------- Nominatim
@@ -183,6 +249,13 @@ interface NominatimRow {
  * Normalise the first Nominatim row. Its `boundingbox` is
  * `["south","north","west","east"]` as strings; anything missing or
  * unparseable falls back to a radius around the point.
+ *
+ * The box is *not* kept verbatim. Nominatim's box is the matched feature's
+ * footprint, which is the wrong thing to search in both directions: too small
+ * for a point-like match (a 10 m box finds nothing), and, for a city, centred
+ * on a footprint midpoint that can be kilometres from the point it returned.
+ * `clampBbox` is applied here, around `lat`/`lng`, so the box this result
+ * carries is already the box that should be searched.
  */
 export function parseNominatim(results: unknown): GeocodeResult | null {
   if (!Array.isArray(results) || results.length === 0) return null;
@@ -201,7 +274,9 @@ export function parseNominatim(results: unknown): GeocodeResult | null {
   return {
     lat,
     lng,
-    bbox: bbox ?? bboxFromCenter(lat, lng),
+    bbox: clampBbox(bbox ?? bboxFromCenter(lat, lng), {
+      center: { lat, lng },
+    }),
     displayName: row.display_name ?? row.name ?? "",
   };
 }
@@ -338,6 +413,61 @@ export function normalizeTitle(title: string): string {
     .trim();
 }
 
+/**
+ * Do these two names plausibly describe the *same* site?
+ *
+ * The question only arises for two entries sitting within `proximityMeters` of
+ * each other. Distance alone is not an answer: measured on a 1.5 km box over
+ * the Chicago Loop, collapsing purely on proximity threw away 17 differently
+ * named sites — the whole of Navy Pier's funfair vanished into "Centennial
+ * Wheel" (32–50 m), and "The Ledge" and "Color Factory" vanished into
+ * "SkyDeck Chicago Willis Tower". A city block holds distinct museums.
+ *
+ * What proximity dedupe is actually for is OSM carrying one site as a node
+ * *and* a way (and sometimes a relation), or as a building plus the thing
+ * inside it. Those agree on the name, or one name contains the other
+ * ("Willis Tower" / "Willis Tower Skydeck"), so that is the test:
+ *
+ * - identical once normalised; or
+ * - every word of the shorter name appears in the longer one; or
+ * - at least 60% of the shorter name's words do.
+ *
+ * It errs towards showing both. Two genuinely adjacent sites in the list costs
+ * the user one unticked checkbox; a silently swallowed one costs them the site.
+ */
+export function titlesLikelySameSite(a: string, b: string): boolean {
+  const left = normalizeTitle(a);
+  const right = normalizeTitle(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  const leftWords = new Set(left.split(" "));
+  const rightWords = new Set(right.split(" "));
+  const shared = [...leftWords].filter((word) => rightWords.has(word)).length;
+  if (shared === 0) return false;
+  const shorter = Math.min(leftWords.size, rightWords.size);
+  return shared / shorter >= 0.6;
+}
+
+/**
+ * The one rule for "these two are the same site", shared by the proposal
+ * ranking and the dialog's "Already added" marker so the list and the tour
+ * cannot disagree about what counts as a duplicate.
+ */
+export function isSameSite(
+  a: { title: string; lat: number; lng: number },
+  b: { title: string; lat: number; lng: number },
+  proximityMeters: number = DEFAULTS.proximityMeters,
+): boolean {
+  if (normalizeTitle(a.title) === normalizeTitle(b.title)) {
+    return Boolean(normalizeTitle(a.title));
+  }
+  return (
+    haversineMeters(a, b) <= proximityMeters &&
+    titlesLikelySameSite(a.title, b.title)
+  );
+}
+
 /** Crude notability proxy: a name, then a wiki link, then real prose. */
 export function scoreCandidate(c: {
   hasTitle: boolean;
@@ -352,17 +482,27 @@ export function scoreCandidate(c: {
   return score;
 }
 
+export interface RankedCandidates {
+  candidates: Candidate[];
+  /**
+   * How many entries were collapsed into one that *is* being shown. Surfaced
+   * in the dialog: silently dropping results is how a user ends up trusting a
+   * list that is not telling them everything.
+   */
+  hidden: number;
+}
+
 /**
  * Rank by notability, then drop duplicates: OSM routinely carries the same
  * site as a node *and* a way (and sometimes a relation), which would otherwise
- * put "Art Institute of Chicago" in the list three times. Two entries collide
- * when they share a normalised name, or when they sit within
- * `proximityMeters` of each other whatever they are called.
+ * put "Art Institute of Chicago" in the list three times. `isSameSite` decides
+ * what counts as a duplicate — a shared name, or proximity *plus* name
+ * affinity, never proximity on its own.
  */
 export function rankAndDedupe(
   elements: OverpassElement[] | null | undefined,
   opts: { topN?: number; proximityMeters?: number } = {},
-): Candidate[] {
+): RankedCandidates {
   const topN = opts.topN ?? DEFAULTS.topN;
   const proximity = opts.proximityMeters ?? DEFAULTS.proximityMeters;
 
@@ -381,19 +521,17 @@ export function rankAndDedupe(
   );
 
   const kept: Candidate[] = [];
+  let hidden = 0;
   for (const candidate of candidates) {
-    const key = normalizeTitle(candidate.title);
-    const duplicate = kept.some(
-      (k) =>
-        normalizeTitle(k.title) === key ||
-        haversineMeters(k, candidate) <= proximity,
-    );
-    if (duplicate) continue;
+    if (kept.some((k) => isSameSite(k, candidate, proximity))) {
+      hidden += 1;
+      continue;
+    }
     const { tags: _tags, hasTitle: _hasTitle, ...clean } = candidate;
     kept.push(clean);
     if (kept.length >= topN) break;
   }
-  return kept;
+  return { candidates: kept, hidden };
 }
 
 /** Coordinates are stored to ~0.1 m; more precision just inflates share URLs. */

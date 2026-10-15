@@ -38,6 +38,8 @@ import {
 export interface PoiResult {
   candidates: Candidate[];
   cached: boolean;
+  /** Entries the dedupe collapsed into a shown one, for the UI to disclose. */
+  hidden: number;
   /** Which mirror answered; useful in a bug report, ignored by the UI. */
   endpoint?: string;
 }
@@ -48,6 +50,9 @@ export interface PoiRequestOptions {
   /** Absolute timestamp the whole proposal step must finish by. */
   deadlineAt?: number;
 }
+
+/** What a session-cached search holds. (`cached`/`endpoint` are per-request.) */
+type CachedPois = Pick<PoiResult, "candidates" | "hidden">;
 
 /** Injectable seam so tests (and the UI) can drive this without a network. */
 export interface PoiService {
@@ -208,7 +213,21 @@ export function describeError(error: unknown): string {
   const name = (error as { name?: string }).name;
   if (name === "TimeoutError") return "timed out";
   if (name === "AbortError") return "cancelled";
-  return (error as { message?: string }).message ?? String(error);
+  const message = (error as { message?: string }).message ?? String(error);
+  // `fetch` rejects with a bare TypeError when the request never left the
+  // machine — DNS failure, no route, airplane mode. Chrome says "Failed to
+  // fetch", Firefox "NetworkError when attempting to fetch resource", Safari
+  // "Load failed", Node "fetch failed"; all four mean the same thing to the
+  // person reading the dialog, and none of them mean it in English.
+  if (isOffline(error, message)) return "you appear to be offline";
+  return message;
+}
+
+function isOffline(error: unknown, message: string): boolean {
+  if (!(error instanceof TypeError)) return false;
+  return /failed to fetch|networkerror|load failed|fetch failed|network request failed/i.test(
+    message,
+  );
 }
 
 export function isCancellation(error: unknown): boolean {
@@ -335,8 +354,14 @@ export async function findPois(
 ): Promise<PoiResult> {
   const key = cacheQuery ? sessionCacheKey("pois", cacheQuery) : null;
   if (key) {
-    const cached = cacheGet<Candidate[]>(key);
-    if (cached) return { candidates: cached, cached: true };
+    const cached = cacheGet<CachedPois | Candidate[]>(key);
+    if (cached) {
+      // Older sessions cached a bare array, before `hidden` existed.
+      const entry: CachedPois = Array.isArray(cached)
+        ? { candidates: cached, hidden: 0 }
+        : cached;
+      return { ...entry, cached: true };
+    }
   }
 
   // Overpass was down a moment ago: do not make the user wait to learn that
@@ -398,15 +423,21 @@ export async function findPois(
     if (!json || !Array.isArray(json.elements)) {
       throw new PoiNetworkError("payload", "Overpass sent no elements");
     }
+    const ranked = rankAndDedupe(json.elements, { topN });
     return {
-      candidates: rankAndDedupe(json.elements, { topN }),
+      candidates: ranked.candidates,
+      hidden: ranked.hidden,
       cached: false,
       endpoint,
     };
   };
 
   const finish = (result: PoiResult): PoiResult => {
-    if (key) cacheSet(key, result.candidates);
+    if (key)
+      cacheSet(key, {
+        candidates: result.candidates,
+        hidden: result.hidden,
+      } satisfies CachedPois);
     forgetOutage(); // Overpass is answering again.
     return result;
   };

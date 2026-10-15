@@ -171,7 +171,20 @@ describe("failures are reported, not swallowed", () => {
       "cancelled",
     );
     expect(describeError(new TypeError("Failed to fetch"))).toBe(
-      "Failed to fetch",
+      "you appear to be offline",
+    );
+    // Every browser words it differently; the user's situation is the same.
+    expect(
+      describeError(
+        new TypeError("NetworkError when attempting to fetch resource."),
+      ),
+    ).toBe("you appear to be offline");
+    expect(describeError(new TypeError("Load failed"))).toBe(
+      "you appear to be offline",
+    );
+    // A TypeError that is not a dead network still says what it was.
+    expect(describeError(new TypeError("x is not a function"))).toBe(
+      "x is not a function",
     );
     expect(describeError(null)).toBe("unknown error");
   });
