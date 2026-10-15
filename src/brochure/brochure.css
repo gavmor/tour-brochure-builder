@@ -8,27 +8,36 @@
    ellipsised one-line blurbs on white cards before the rename). `.stop-badge`
    in shared/stopBadge.css is the one class the two views share on purpose.
 
-   Geometry, once, as tokens: US Letter landscape, 0.35in margins, three equal
-   3.667in panels. The map spans panels 1–2 and the itinerary owns panel 3, so
-   the map column is (2 × 3.667in − 0.35in) = 6.983in of the 10.3in content box
-   and the itinerary column is the remaining 3.317in. Those two numbers are
-   what keep the fold lines off the text.
+   Geometry, once, as tokens: US Letter landscape printed **full bleed** —
+   `@page { margin: 0 }`, so the content box *is* the sheet, 11in × 8.5in, and
+   the three fold panels are exact thirds of it. The map spans panels 1–2 and
+   the itinerary owns panel 3, so the column boundary falls on the second fold
+   at 22/3in and the fold lines stay off the text. At 96dpi the thirds divide
+   evenly (1056px / 3 = 352px), so `calc()` here is exact, not approximate.
    =========================================================================== */
 
 @import "../fonts/fonts.css";
 @import "../shared/stopBadge.css";
 
 .brochure {
-  --page-margin: 0.35in;
-  --content-w: 10.3in; /* 11in − 2 × margin */
-  /* 8.5in − 2 × margin. The staged preview is laid out at this nominal
-     height; the actual print uses `100vh`, i.e. the engine's real page box,
-     which can be a hair smaller. `SPILL_RESERVE_PX` (0.19in) absorbs the
-     difference, so a measurement taken on the preview still holds on paper. */
-  --content-h: 7.8in;
-  --map-w: 6.983in; /* panels 1–2, minus the left page margin */
-  --col-w: 3.317in; /* panel 3, minus the right page margin */
+  /* The sheet itself. There is no page margin to subtract: full bleed is the
+     decision, so content runs to all four edges (see README → Printing). */
+  --sheet-w: 11in;
+  --sheet-h: 8.5in;
+  --panel-w: calc(var(--sheet-w) / 3); /* 3.6667in — the fold pitch */
+  --content-w: var(--sheet-w);
+  /* The staged preview is laid out at this nominal height; the actual print
+     uses the engine's real page box, which can be a hair smaller.
+     `SPILL_RESERVE_PX` (0.19in) absorbs the difference, so a measurement taken
+     on the preview still holds on paper. */
+  --content-h: var(--sheet-h);
+  --map-w: calc(var(--sheet-w) / 3 * 2); /* panels 1–2, up to the 2nd fold */
+  --col-w: var(--panel-w); /* panel 3, from the 2nd fold to the right edge */
   --fold-safe: 0.3in; /* > 0.2in of clearance from the fold at 7.333in */
+  /* How far anything that must stay *readable* is held off the paper edge.
+     Full bleed means backgrounds reach the trim; text and the OSM credit do
+     not, because a printer's non-printable margin would eat them. */
+  --bleed-safe: 0.22in;
 
   --ink: #22303c;
   --muted: #6b6257;
@@ -98,6 +107,12 @@
   background: #e9e5dc;
   color: var(--ink);
   font-family: var(--font-body);
+  /* Backgrounds (cream column, ribbon, badges, map) are the design, not
+     decoration, and at full bleed they *are* the page edge: keep them when the
+     browser would otherwise drop them to save ink. Declared at the root so it
+     inherits to everything the brochure owns. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 /* The paper metric set. Listed twice — once for the staged on-screen preview,
@@ -299,6 +314,8 @@
   min-width: 0;
   min-height: 24rem;
   background: #dfe8ea;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .brochure-map {
@@ -395,6 +412,8 @@
   background: var(--cream);
   border-left: 1px solid var(--hairline);
   overflow-y: auto;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .bro-ribbon {
@@ -403,6 +422,8 @@
   background: var(--ribbon);
   color: #fff;
   text-align: center;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
   /* The reference's notched ribbon tails, in CSS rather than an image. */
   clip-path: polygon(
     0 0,
@@ -481,19 +502,38 @@
 
 .brochure--staging .brochure__attribution {
   display: block;
-  /* In normal flow, as the map panel's last grid row — Firefox pushed an
-     absolutely-positioned credit onto the next page. */
+  /* In normal flow, as a grid item sharing the map's cell — Firefox pushed an
+     absolutely-positioned credit onto the next page, and a dedicated bottom
+     row would print as a white band across the bleed edge. */
+  grid-area: 1 / 1;
+  align-self: end;
+  justify-self: end;
+  /* Held off the trim: the credit is a licence term, so it must not be the
+     thing a printer's non-printable margin eats. */
+  margin: var(--bleed-safe);
   text-align: right;
   padding: 0.02in 0.06in;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 2px;
   color: #222;
   font-size: 6.5pt;
   line-height: 1.4;
+  /* Relative, not absolute: paints over Leaflet's panes without leaving the
+     flow (see above). */
+  position: relative;
+  z-index: 1100;
 }
 
+/* One cell, two items: the map fills the whole panel so its tiles reach every
+   sheet edge the panel touches, and the credit floats in its corner. */
 .brochure--staging .brochure__map-panel {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.brochure--staging .brochure-map {
+  grid-area: 1 / 1;
 }
 .brochure--staging .brochure__attribution a {
   color: #222;
@@ -772,8 +812,8 @@
   min-height: 0;
 }
 
-/* The map fills what the credit row leaves of the panel — in staging exactly
-   as in print, so Leaflet measures the box it will actually be printed at. */
+/* The map fills the whole panel — in staging exactly as in print, so Leaflet
+   measures the box it will actually be printed at, right out to the bleed. */
 .brochure--staging .brochure-map {
   height: 100%;
   min-height: 0;
@@ -791,16 +831,27 @@
 }
 
 @media print {
+  /* Full bleed (Gavin's decision): no page margin at all, so the content box
+     is the whole 11in × 8.5in sheet and every background runs to the trim.
+     See README → Printing for the hardware caveat. */
   @page {
     size: letter landscape;
-    margin: 0.35in;
+    margin: 0;
   }
 
+  /* Nothing between the sheet and the paper: any residual html/body/#app box
+     model would print as exactly the white frame this change removes. */
   html,
   body,
   #app {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    width: auto;
     min-height: 0;
     background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .no-print,
@@ -819,9 +870,13 @@
 
   .brochure {
     display: block;
+    margin: 0;
+    padding: 0;
     min-height: 0;
     background: #fff;
     font-size: 10pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
 
     /* The paper metric set — same `--paper-*` values the staging preview uses,
        so the measured spill-over point matches what actually prints. */
@@ -841,37 +896,45 @@
   }
 
   .brochure__sheet {
-    width: auto;
+    width: var(--sheet-w);
+    margin: 0;
     padding: 0;
     gap: 0;
   }
 
   .brochure__page {
     box-shadow: none;
+    margin: 0;
   }
 
-  /* Page 1: the tri-fold sheet. Heights are the nominal page box in inches,
-     the same values the staged preview uses, so what Leaflet measured while
-     staging is exactly what gets printed. */
+  /* Page 1: the tri-fold sheet, edge to edge. The columns are exact thirds of
+     the 11in sheet, so the folds fall at 11/3in and 22/3in and the second fold
+     is the map/itinerary boundary. Heights are the full page box, the same
+     values the staged preview uses, so what Leaflet measured while staging is
+     exactly what gets printed. */
   .brochure__page--main {
     display: grid;
     grid-template-columns: var(--map-w) var(--col-w);
+    width: var(--sheet-w);
     height: var(--content-h);
     max-height: none;
     break-inside: avoid;
   }
 
+  /* One cell, two items: the map fills the panel out to the sheet edges it
+     touches (left, top, bottom), and the credit floats in its corner. A
+     dedicated bottom row would have printed as a white band across the bleed. */
   .brochure__map-panel {
     height: var(--content-h);
     min-height: 0;
     break-inside: avoid;
-    /* The credit rides as the last row, in flow: Firefox moved an absolutely
-       positioned one to the following page. */
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .brochure-map {
+    grid-area: 1 / 1;
     height: 100%;
     min-height: 0;
     break-inside: avoid;
@@ -907,11 +970,13 @@
     widows: 2;
   }
 
-  /* The legend prints as a static key, not a control. */
+  /* The legend prints as a static key, not a control. At full bleed its inset
+     is measured from the paper edge, so it uses `--bleed-safe` rather than the
+     old page margin plus a hair. */
   .bro-legend {
     position: absolute;
-    left: 0.14in;
-    bottom: 0.22in;
+    left: var(--bleed-safe);
+    bottom: var(--bleed-safe);
     max-width: 2.4in;
     background: #fff;
     box-shadow: none;
@@ -940,12 +1005,23 @@
 
   .brochure__attribution {
     display: block;
+    /* Shares the map's grid cell (see `.brochure__map-panel` above) and is
+       held `--bleed-safe` off the trim, so a printer's non-printable margin
+       cannot clip a licence term. */
+    grid-area: 1 / 1;
+    align-self: end;
+    justify-self: end;
+    margin: var(--bleed-safe);
     text-align: right;
     padding: 0.02in 0.06in;
-    background: #fff;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 2px;
     color: #222;
     font-size: 6.5pt;
     line-height: 1.4;
+    position: relative;
+    z-index: 1100;
+    break-inside: avoid;
   }
 
   .brochure__attribution a {
@@ -953,10 +1029,13 @@
     text-decoration: none;
   }
 
-  /* Continuation pages: stop detail cards, three balanced columns. */
+  /* Continuation pages: stop detail cards, three balanced columns.
+     These sheets are white on white — there is no background to bleed — so
+     they keep a `--bleed-safe` inset instead. Running body copy into the
+     printer's non-printable margin would only lose text. */
   .bro-cards {
     break-before: page;
-    padding: 0;
+    padding: var(--bleed-safe);
     box-shadow: none;
     column-count: 3;
     column-gap: 0.3in;
@@ -975,6 +1054,7 @@
   .bro-spill {
     display: block;
     break-before: page;
+    padding: var(--bleed-safe);
     column-count: 3;
     column-gap: 0.3in;
     column-fill: balance;

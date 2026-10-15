@@ -150,6 +150,60 @@ The OSM attribution is part of the tile layer, so it is present wherever the
 map is: it is a licence term, not decoration. Tile `maxZoom` is 19 and nothing
 prefetches tiles.
 
+## Printing (`src/brochure/`)
+
+The brochure prints **full bleed** on US Letter landscape: `@page { size: letter
+landscape; margin: 0 }`, so the CSS content box *is* the 11 in × 8.5 in sheet
+and the map, the cream itinerary panel, the ribbon and every background fill run
+to all four edges. There is no white frame.
+
+The tri-fold geometry is stated once, as tokens in `brochure.css`, and is exact
+rather than approximate: the three panels are `calc(11in / 3)` each (1056 px / 3
+= 352 px at 96 dpi), so the folds land on 3.667 in and 7.333 in and the second
+fold is exactly where the map stops and the itinerary column starts. All inner
+gutters are padding *inside* a panel, so a padding change can never move a fold.
+
+Two things deliberately stay off the trim, because they are text and a printer
+would eat them:
+
+- the legend and the OSM credit are inset by `--bleed-safe` (0.22 in). The credit
+  is a tile-licence obligation, so it floats over the map's bottom-right corner
+  rather than riding in a white band across the bleed edge.
+- the continuation sheets (itinerary spill, stop detail cards) keep the same
+  0.22 in inset. They are white on white — there is no background to bleed —
+  so an inset costs nothing and running body copy into the edge would lose text.
+
+### Printer caveat
+
+`margin: 0` is what the CSS asks for; it is not what every device delivers. Most
+physical printers have a **non-printable hardware margin** (typically 3–6 mm, and
+more along the trailing edge), so a sheet from a desk inkjet will usually still
+have a thin white border unless the device supports borderless printing. For
+genuine edge-to-edge output:
+
+- turn on **Borderless** / **Edge-to-edge** in the printer driver, if it has it;
+- turn **off** "Fit to page" / "Shrink to fit" and keep **Scale: 100 %** — scaling
+  re-introduces a margin *and* shifts the fold lines off 3.667 in / 7.333 in;
+- leave **Margins: None** (Chromium) or **Default** if None is unavailable.
+
+The reliable reference output is **Save as PDF** from Chromium with *Margins:
+None*, *Scale: 100 %* and **Background graphics enabled** — without background
+graphics the browser drops the fills and the brochure prints as line art. The
+CSS sets `print-color-adjust: exact` on the brochure root and on every element
+that carries a fill, which covers the engines that honour it, but Chromium's
+checkbox still wins.
+
+### How the print flow works
+
+A Leaflet map cannot simply be handed to `window.print()`: tiles are async, so a
+naive print snapshots a half-grey map. `printing.ts` stages the sheet into its
+print geometry *on screen* first, lets the map re-measure
+(`map.invalidateSize()`) and request tiles for exactly the box that will be
+printed, waits for tiles and lazy images to settle (both bounded), measures
+where the itinerary column overflows so the tail prints on a continuation sheet
+instead of being clipped, and only then prints. Ctrl+P bypasses the button and
+gets a best-effort version of the same staging via `beforeprint`.
+
 ## Deployment
 
 Pushes to `main` automatically deploy to GitHub Pages via the workflow in
