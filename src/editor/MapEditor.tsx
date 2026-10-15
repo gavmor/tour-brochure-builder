@@ -513,6 +513,7 @@ export function MapEditor() {
       <section
         ref={hostRef}
         class="map-pane__canvas"
+        data-testid="map-canvas"
         aria-label="Tour map. Drag numbered markers to move stops."
       />
       {armed && !locked ? (
