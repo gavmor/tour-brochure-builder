@@ -48,7 +48,13 @@ import {
 } from "./store";
 import { buildHash, decodeTour, encodeTour, parseHash } from "./urlShare";
 
-/** Boot the app the way `main.tsx` does, with nothing in the URL. */
+/**
+ * Boot the app the way `main.tsx` does, with no URL state.
+ *
+ * Re-based by task t_40ec912a onto the single-store model (ADR 0002, PR #3):
+ * `persistence.ts`/`clearStoredTour` are gone and `initStore` takes `urlSync`
+ * instead of `key`/`autosave`. The journey under test is unchanged.
+ */
 function firstLoad() {
   return initStore({
     hash: "",
@@ -69,7 +75,7 @@ function editTheSeededTour(): Tour {
   });
   updateStop(second.id, { category: "museum", blurb: "Edited blurb" });
   reorderStops(1, 0, route.id); // drag the museum to the top
-  updateRoute(route.id, { color: ROUTE_COLORS[6], profile: "cycling" });
+  updateRoute(route.id, { color: ROUTE_COLORS[6], profile: "bike" });
   addStop({ lat: 41.8705, lng: -87.6505, title: "Stop 7" }, route.id); // map click
   setTourMeta({ title: "QA edited tour", tagline: "Edited tagline" });
 
@@ -119,7 +125,7 @@ describe("seeded -> edited -> share URL -> fresh load (epic item 7)", () => {
     const edited = editTheSeededTour();
     const hash = buildHash(edited, { view: true });
 
-    // A different browser: nothing but the pasted URL.
+    // A different browser: nothing but the pasted URL (the hash is the only store).
     resetStore();
     const boot = initStore({
       hash,
@@ -136,7 +142,7 @@ describe("seeded -> edited -> share URL -> fresh load (epic item 7)", () => {
     // The edits, not the template.
     expect(tour.value.title).toBe("QA edited tour");
     expect(totalStops(tour.value)).toBe(7);
-    expect(routeProfile(tour.value.routes[0])).toBe("cycling");
+    expect(routeProfile(tour.value.routes[0])).toBe("bike");
     expect(tour.value.routes[0].color).toBe(ROUTE_COLORS[6]);
     expect(stopCategory(tour.value.routes[0].stops[0])).toBe("museum");
   });

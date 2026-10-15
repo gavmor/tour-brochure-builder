@@ -5,6 +5,32 @@
  * *within its route*, so numbering restarts at 1 for every route.
  */
 
+import {
+  DEFAULT_ROUTE_PROFILE,
+  isRouteProfile,
+  normalizeProfile,
+  ROUTE_PROFILES,
+  type RouteProfile,
+} from "../routing/types";
+
+/**
+ * Re-exported, not redeclared (ADR 0001): the travel-mode union has exactly
+ * one definition, in the routing layer, and `Route.profile` is the same type
+ * the router is handed. `src/routing/types.ts` is a leaf module — plain types
+ * and constants, no Leaflet, no fetch — so the tour layer picking it up costs
+ * nothing and introduces no cycle.
+ *
+ * `ROUTE_PROFILES` is the canonical id list (what `z.enum` validates against);
+ * {@link ROUTE_PROFILE_OPTIONS} below is the same set with the UI's wording.
+ */
+export {
+  DEFAULT_ROUTE_PROFILE,
+  isRouteProfile,
+  normalizeProfile,
+  ROUTE_PROFILES,
+  type RouteProfile,
+};
+
 export const TOUR_SCHEMA_VERSION = 2 as const;
 
 /** A single point on a route. */
@@ -35,14 +61,21 @@ export interface Route {
   color: string;
   stops: Stop[];
   /**
-   * Travel mode for the route (choice-first UX §3a). Omitted when it is the
-   * default (`walking`). Read through {@link routeProfile} so absence resolves
-   * to the default. Cosmetic for now; reserved for real routing later.
+   * Travel mode for the route (choice-first UX §3a), and the mode the router
+   * is actually asked for. **Absent means `foot`** — the default is never
+   * written out, because `"profile":"foot"` on every route is share-URL
+   * budget for no information (ADR 0001). Read through {@link routeProfile}
+   * so absence, and anything unrecognised, resolve to the default.
+   *
+   * Geometry itself is deliberately *not* a field here: ADR 0001 measured a
+   * geometry-bearing share URL at 143 % of the 8,000-char ceiling and chose
+   * to recompute at view time instead.
    */
   profile?: RouteProfile;
   /**
-   * Optional shape points for the polyline (SPEC D4). v1 draws straight
-   * segments; `via` is the manual fidelity escape hatch, no routing service.
+   * Optional shape points for the polyline (SPEC D4). Author-drawn, and
+   * unrelated to routing: where both exist the `via` points are handed to the
+   * router as intermediate waypoints rather than discarded (ADR 0001).
    */
   via?: [number, number][];
 }
@@ -131,28 +164,35 @@ export const COLOR_SWATCHES = ROUTE_COLORS;
 
 export const DEFAULT_ROUTE_COLOR = ROUTE_COLORS[0];
 
-/** Travel modes offered as a segmented control (choice-first UX §3a). */
-export type RouteProfile = "walking" | "driving" | "cycling";
-
-export const ROUTE_PROFILES: {
+/**
+ * Travel modes offered as a segmented control (choice-first UX §3a).
+ *
+ * The *ids* are ADR 0001's, not the wording: `foot` / `bike` / `driving` are
+ * what go in the share URL and what the routing endpoints are keyed on. The
+ * choice-first work shipped this control with `walking` / `cycling` ids while
+ * the profile was still cosmetic; those are now legacy values the validator
+ * repairs (t_2c1641fe), so links from that build keep working.
+ */
+export const ROUTE_PROFILE_OPTIONS: {
   id: RouteProfile;
   label: string;
   icon: string;
 }[] = [
-  { id: "walking", label: "Walking", icon: "🚶" },
+  { id: "foot", label: "Walking", icon: "🚶" },
   { id: "driving", label: "Driving", icon: "🚗" },
-  { id: "cycling", label: "Cycling", icon: "🚲" },
+  { id: "bike", label: "Cycling", icon: "🚲" },
 ];
 
-export const DEFAULT_ROUTE_PROFILE: RouteProfile = "walking";
-
-export function isRouteProfile(v: unknown): v is RouteProfile {
-  return v === "walking" || v === "driving" || v === "cycling";
-}
-
-/** A route always has a profile; absence resolves to the default (§3a). */
+/**
+ * A route always has a profile; absence — and anything unrecognised, including
+ * a hand-edited URL or a `walking` from the pre-routing build — resolves to
+ * the default (§3a, ADR 0001). This is the single read site for
+ * `Route.profile`.
+ */
 export function routeProfile(route: Pick<Route, "profile">): RouteProfile {
-  return isRouteProfile(route.profile) ? route.profile : DEFAULT_ROUTE_PROFILE;
+  return route.profile === undefined
+    ? DEFAULT_ROUTE_PROFILE
+    : normalizeProfile(route.profile);
 }
 
 /** Stop category preset list, each with its map/legend icon (choice-first UX §3c). */
@@ -204,6 +244,7 @@ export function categoryMeta(category: StopCategory) {
 
 /** Practical share-URL ceiling before proxies/chat clients truncate (SPEC §6). */
 export const SHARE_URL_MAX = 8000;
+
 /** Warn the author above this encoded length (SPEC §6). */
 export const SHARE_URL_WARN = 6000;
 
@@ -246,13 +287,21 @@ export function createRoute(init: Partial<Route> = {}, index = 0): Route {
     name: init.name ?? `Route ${index + 1}`,
     color: init.color ?? ROUTE_COLORS[index % ROUTE_COLORS.length],
     stops: init.stops ? init.stops.map((s) => ({ ...s })) : [],
-    // Omit the profile when it is the default (walking) so default tours stay
-    // byte-free in the share URL (§6).
-    ...(init.profile !== undefined && init.profile !== DEFAULT_ROUTE_PROFILE
-      ? { profile: init.profile }
+    // Omit the profile when it is the default (foot) so default tours stay
+    // byte-free in the share URL (§6, ADR 0001). Normalised on the way in, so
+    // a legacy `walking`/`cycling` from the pre-routing build canonicalises
+    // rather than being stored as-is.
+    ...(init.profile !== undefined &&
+    normalizeProfile(init.profile) !== DEFAULT_ROUTE_PROFILE
+      ? { profile: normalizeProfile(init.profile) }
       : {}),
     ...(init.via
       ? { via: init.via.map((p) => [p[0], p[1]] as [number, number]) }
+      : {}),
+    // Spread conditionally, exactly as `via` is: the default profile is
+    // *absent*, never serialized (ADR 0001).
+    ...(init.profile !== undefined && init.profile !== DEFAULT_ROUTE_PROFILE
+      ? { profile: init.profile }
       : {}),
   };
 }

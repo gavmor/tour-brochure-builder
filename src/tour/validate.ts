@@ -16,13 +16,26 @@ import {
   isRouteProfile,
   isStopCategory,
   newId,
+  normalizeProfile,
   ROUTE_COLORS,
+  ROUTE_PROFILES,
   type Route,
+  type RouteProfile,
   type Stop,
   TOUR_SCHEMA_VERSION,
   type Tour,
   type TourSettings,
 } from "./schema";
+
+/**
+ * Runtime validation, repair and migration for tour data arriving from
+ * untrusted places: a pasted share URL or an uploaded .json file.
+ *
+ * Policy: repair what is unambiguously repairable (missing ids, missing
+ * titles, a `version: 1` flat tour, a single bad stop in an otherwise good
+ * route) and report it as a warning; reject only what cannot be salvaged
+ * (not an object, unknown schema version, unparseable JSON).
+ */
 
 /** Strict shape of a canonical, already-repaired tour. */
 const stopSchema = z.object({
@@ -53,7 +66,10 @@ const routeSchema = z.object({
   name: z.string(),
   color: z.string().min(1),
   stops: z.array(stopSchema),
-  profile: z.enum(["walking", "driving", "cycling"]).optional(),
+  // Additive in v2 (ADR 0001): a tour without `profile` is still a valid v2
+  // tour, so `TOUR_SCHEMA_VERSION` does not move and old links keep loading.
+  // The enum is the routing layer's canonical id list, not a second copy.
+  profile: z.enum(ROUTE_PROFILES).optional(),
   via: z.array(z.tuple([z.number(), z.number()])).optional(),
 });
 
@@ -73,11 +89,28 @@ const tourSchema = z.object({
     .optional(),
 });
 
+/**
+ * Which identifying fields the input genuinely carried, as opposed to ones
+ * `parseTour` had to invent. Empty means nothing about the input said "tour".
+ */
+export type TourField = "id" | "title" | "routes";
+
 export interface ParseOk {
   ok: true;
   tour: Tour;
   /** Non-fatal repairs applied, in the order they happened. */
   warnings: string[];
+  /**
+   * The identifying fields that were present and usable in the input.
+   *
+   * `parseTour` repairs aggressively by design, which means it turns *any*
+   * JSON object into a valid empty tour — `{"hello":"world"}` included. That
+   * is right for a file the user deliberately opened, and wrong for a `#t=`
+   * payload, where it silently replaces the curated starter with a blank tour
+   * and no notice. Callers that need to tell "a tour" from "an object" ask
+   * this (see `isUnrecognisedTour`); nothing else changes.
+   */
+  recognised: TourField[];
   /** Set when the input used an older schema version. */
   migratedFrom?: number;
 }
@@ -212,6 +245,48 @@ function repairVia(raw: unknown, warn: (m: string) => void, where: string) {
   return points.length ? points : undefined;
 }
 
+/**
+ * Travel mode, repaired in the same spirit as everything else here: a value
+ * we do not recognise warns and falls back to the default, it never fails the
+ * parse (ADR 0001 — a hand-edited URL must still render).
+ *
+ * Two values are *not* unrecognised, they are legacy: the choice-first build
+ * shipped `walking` and `cycling` while the profile was still cosmetic.
+ * `normalizeProfile` maps them to `foot` and `bike` silently, so every link
+ * that build emitted keeps its travel mode instead of being reset to walking.
+ *
+ * An explicit `"foot"` is dropped rather than kept, because `createRoute`
+ * omits the default: canonical output has to be the same whether a route came
+ * from the factory or from a parse, or share links stop round-tripping
+ * byte-identically.
+ */
+function repairProfile(
+  raw: unknown,
+  warn: (m: string) => void,
+  where: string,
+): RouteProfile | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const normalized = normalizeProfile(raw);
+  // `normalizeProfile` answers `foot` both for a real foot/walking value and
+  // for nonsense, so the warning is gated on the input being known wording.
+  if (!isRouteProfile(raw) && !isLegacyProfileName(raw)) {
+    warn(
+      `${where}: unknown routing profile "${String(raw)}"; used "${DEFAULT_ROUTE_PROFILE}"`,
+    );
+    return undefined;
+  }
+  return normalized === DEFAULT_ROUTE_PROFILE ? undefined : normalized;
+}
+
+/** Travel-mode wording from the pre-routing choice-first build (t_2c1641fe). */
+const LEGACY_PROFILE_NAMES = ["walking", "cycling", "walk", "car", "bicycle"];
+
+function isLegacyProfileName(raw: unknown): boolean {
+  return (
+    typeof raw === "string" && LEGACY_PROFILE_NAMES.includes(raw.toLowerCase())
+  );
+}
+
 function repairRoute(
   raw: unknown,
   index: number,
@@ -244,15 +319,11 @@ function repairRoute(
     color: color ?? ROUTE_COLORS[index % ROUTE_COLORS.length],
     stops,
   };
-  // Keep only a recognised, non-default profile; anything else resolves to the
-  // default (walking) at read time, so it is simply omitted here (§3a, §6).
-  if (raw.profile !== undefined && raw.profile !== null) {
-    if (isRouteProfile(raw.profile)) {
-      if (raw.profile !== DEFAULT_ROUTE_PROFILE) route.profile = raw.profile;
-    } else {
-      warn(`${where}: dropped an unknown profile "${String(raw.profile)}"`);
-    }
-  }
+  // Keep only a recognised, non-default profile; everything else — absent,
+  // legacy wording, nonsense — resolves to the default at read time, so it is
+  // simply omitted here (§3a, §6, ADR 0001).
+  const profile = repairProfile(raw.profile, warn, where);
+  if (profile) route.profile = profile;
   const via = repairVia(raw.via, warn, where);
   if (via) route.via = via;
   return route;
@@ -340,6 +411,7 @@ export function parseTour(input: unknown): ParseResult {
 
   const warnings: string[] = [];
   const warn = (m: string) => warnings.push(m);
+  const recognised: TourField[] = [];
 
   let raw = input;
   let migratedFrom: number | undefined;
@@ -352,9 +424,11 @@ export function parseTour(input: unknown): ParseResult {
   }
 
   const id = cleanString(raw.id);
-  if (!id) warn("Tour was missing an id; generated one.");
+  if (id) recognised.push("id");
+  else warn("Tour was missing an id; generated one.");
   const title = cleanString(raw.title);
-  if (!title) warn('Tour was missing a title; used "Untitled tour".');
+  if (title) recognised.push("title");
+  else warn('Tour was missing a title; used "Untitled tour".');
 
   const rawRoutes = Array.isArray(raw.routes) ? raw.routes : [];
   if (!Array.isArray(raw.routes))
@@ -365,6 +439,9 @@ export function parseTour(input: unknown): ParseResult {
     const route = repairRoute(rawRoute, i, warn);
     if (route) routes.push(route);
   });
+  // An array of routes only counts as a recognised field if at least one of
+  // them survived repair — `routes: []` identifies nothing.
+  if (routes.length > 0) recognised.push("routes");
   if (routes.length === 0) {
     routes.push(createRoute());
     warn("Tour had no usable routes; started an empty default route.");
@@ -400,8 +477,21 @@ export function parseTour(input: unknown): ParseResult {
   }
 
   return migratedFrom === undefined
-    ? { ok: true, tour, warnings }
-    : { ok: true, tour, warnings, migratedFrom };
+    ? { ok: true, tour, warnings, recognised }
+    : { ok: true, tour, warnings, recognised, migratedFrom };
+}
+
+/**
+ * True when a parse succeeded only because every identifying field was
+ * invented: no id, no title, no usable route. The result is a valid empty
+ * tour, but the input was not a tour — `{"hello":"world"}` parses this way.
+ *
+ * Used to stop a junk `#t=` payload from taking over the app (it loaded a
+ * blank "Untitled tour", suppressed the curated starter, and then overwrote
+ * the address bar so the original link could not even be retried).
+ */
+export function isUnrecognisedTour(result: ParseResult): boolean {
+  return result.ok && result.recognised.length === 0;
 }
 
 /** `parseTour` over a JSON string. Never throws. */

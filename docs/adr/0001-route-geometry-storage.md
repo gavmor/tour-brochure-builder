@@ -172,6 +172,31 @@ app" for anyone holding a stale bundle.
 Walking tours are the common case for a hand-built brochure; the reference tour sets
 `driving` explicitly on all three routes. Absent means foot.
 
+### Vocabulary collision with the choice-first controls (resolved on t_2c1641fe)
+
+While this ADR was being written, the choice-first controls card (t_4c696e9d) shipped its
+own `Route.profile` as a segmented control, with the values `walking | driving | cycling`
+and the default `walking` — self-described in `schema.ts` as *"cosmetic for now; reserved
+for real routing later"*. Both cards had decided the same field independently, and both
+had already landed on `main`.
+
+**This ADR's vocabulary wins.** `foot | bike | driving` is what `src/routing/endpoints.ts`
+keys a FOSSGIS host on; the other set was a placeholder for exactly this work, and
+`normalizeProfile` already accepted `walking` and `cycling` as aliases. Resolution, as
+implemented:
+
+- `RouteProfile`, `ROUTE_PROFILES`, `DEFAULT_ROUTE_PROFILE` and `isRouteProfile` have one
+  definition, in `src/routing/types.ts`; `src/tour/schema.ts` re-exports rather than
+  redeclares them.
+- The **UI is unchanged** — the segmented control, its labels ("Walking", "Driving",
+  "Cycling") and its icons are the choice-first design. Only the stored ids moved, via
+  `ROUTE_PROFILE_OPTIONS`.
+- `routeProfile(route)` stays the single read site and now resolves through
+  `normalizeProfile`, so `walking` → `foot` and `cycling` → `bike`.
+- Links emitted by the choice-first build **migrate silently, not with a warning**: a
+  rename is not a repair. `repairProfile` treats the old wording as legacy, canonicalises
+  it, and keeps warning only for genuinely unknown values.
+
 ### Caching
 
 Recompute-on-load is only acceptable if it happens once. Required behaviour for

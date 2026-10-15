@@ -20,9 +20,17 @@ import {
 } from "../tour";
 import { Itinerary } from "./Itinerary";
 import { MapEditor } from "./MapEditor";
+import { NearbyPanel } from "./NearbyPanel";
 import { RoutePanel } from "./RoutePanel";
 import { StopPanel } from "./StopPanel";
-import { addMode, requestFit, shapeMode } from "./uiState";
+import {
+  addMode,
+  closeNearby,
+  nearbyOpen,
+  openNearby,
+  requestFit,
+  shapeMode,
+} from "./uiState";
 import "./editor.css";
 
 export function Editor() {
@@ -143,6 +151,17 @@ export function Editor() {
           </button>
           <button
             type="button"
+            class={nearbyOpen.value ? "primary primary--on" : ""}
+            disabled={locked}
+            aria-pressed={nearbyOpen.value}
+            aria-expanded={nearbyOpen.value}
+            title="Propose notable sites near a place, already selected — trim the list"
+            onClick={() => (nearbyOpen.value ? closeNearby() : openNearby())}
+          >
+            Add sites near a location
+          </button>
+          <button
+            type="button"
             onClick={requestFit}
             disabled={stopCount.value === 0}
             title="Zoom the map to fit every stop"
@@ -220,6 +239,7 @@ export function Editor() {
       <div class="editor__body">
         <MapEditor />
         <aside class="editor__sidebar">
+          {nearbyOpen.value ? <NearbyPanel /> : null}
           <RoutePanel />
           <Itinerary />
           <StopPanel />

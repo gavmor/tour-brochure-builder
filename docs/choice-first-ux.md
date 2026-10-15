@@ -119,11 +119,16 @@ Every control below ships with (i) a defined **option set**, (ii) a **default al
 
 ### 3a. Route profile — segmented control / chips
 
-- **Options:** `walking` · `driving` · `cycling` (exactly these three; they map to future OSRM profiles and to polyline styling).
+- **Options:** Walking · Driving · Cycling (exactly these three).
 - **Control:** segmented control (single-select chips). Always exactly one selected — there is no "unset."
-- **Default:** inherited from the tour (starter template default = **walking**).
-- **Reset:** a "Reset to default" affordance on the route panel returns it to **walking**. (There is no "clear to empty" — a route always has a profile.)
-- **Effect:** choice is cosmetic for the smoke scope (polyline style/label); semantics reserved for real routing later.
+- **Default:** inherited from the tour (starter template default = **Walking**).
+- **Reset:** a "Reset to default" affordance on the route panel returns it to **Walking**. (There is no "clear to empty" — a route always has a profile.)
+- **Effect:** ~~cosmetic for the smoke scope~~ — **real** as of t_2c1641fe. The choice selects the routing host the road geometry comes from.
+- **Stored ids:** `foot` · `driving` · `bike`, not the labels. The names are
+  ADR 0001's, because they are what `src/routing/endpoints.ts` keys a FOSSGIS
+  host on. The labels above are unchanged; only what goes in the URL moved.
+  Links emitted by this card's build (`walking` / `cycling`) migrate silently
+  — see [ADR 0001 § Vocabulary collision](adr/0001-route-geometry-storage.md).
 
 ### 3b. Route color — swatch palette
 
@@ -238,3 +243,30 @@ Route is cycling, green; first stop is a museum. A tour using all defaults (walk
 - **t_0e197ca6 (POI proposal flow):** implement §2 exactly — Nominatim pick-list geocode, the Overpass QL above, N=12 ranking, all-preselected trim list, the three UI states, append-not-replace, de-dupe, in-session caching + debounce.
 - **t_4c696e9d (choice-first controls):** implement §3 controls and §6 serialization; remove manual lat/lng from the primary UI; keep marker-drag + map-click add.
 - **t_9f25df7e (verify):** check against the acceptance checklist and R1–R3.
+
+---
+
+## Implementation status (task t_40ec912a)
+
+All three features now ship from one codebase; §2 landed last, ported from the
+`~/Documents/tour-builder` spike into `src/poi/` + `src/editor/NearbyPanel.tsx`.
+Where the shipped behaviour differs from the spec above, the spec is the older
+document and this list is the record:
+
+| Spec | Shipped | Why |
+|------|---------|-----|
+| §1 load order `URL → localStorage → starter` | `URL → starter` | localStorage was removed outright by [ADR 0002](adr/0002-url-sole-source-of-truth.md); the hash is the only store. |
+| §2 debounce Nominatim typing (≥500 ms) | No typing-triggered geocode at all | Geocoding runs only on *Search*/<kbd>Enter</kbd>. Stricter than the policy asks: zero requests per keystroke. |
+| §2 empty-result offers "widen to 5 km" | Offers the curated set | Same promise (never a dead end, R1) through the one mechanism that also covers offline and rate-limited. A radius widener is still worth adding. |
+| §2 "Nominatim and Overpass failures reported separately" | Separate messages, one retry | `Could not find "X"` vs `Could not reach OpenStreetMap (…)`, each with the curated list beneath it. |
+| §2 per-request timeout | One **20 s deadline for the whole step**, mirrors **hedged** inside it (next one after 4 s of silence, earlier request kept alive, losers aborted), plus a 60 s outage memo | A per-request timeout cost 3 × 10 s of spinner before the fallback appeared (QA-BUG-3 against the spike). The spike's fix — split the deadline evenly across mirrors — then guaranteed failure whenever the only healthy mirror was slower than its slice, which is what measurement found: one mirror answering in ~20 s, the other two dead. Hedging keeps the bound and still lets a slow-but-alive mirror win. |
+| §2 radius 1500 m around a dropped pin, city bbox from Nominatim | Pin radius as specified; **every** search box is clamped to a 0.10° (~11 km) maximum *and a 1500 m minimum*, both around the geocoded point | Measured against the canonical instance: 0.25° of Porto was refused with a server-side timeout after ~9 s, 0.10° answered in under 3 s with 726 elements. A brochure tour does not span 28 km anyway. The floor and the centring came later, from task t_cde077ad: Nominatim's box is the matched *feature's* footprint, so `Navy Pier, Chicago` matched a trail connector with a 10 m box (Overpass: 0 elements, so the app claimed nothing was mapped at Navy Pier; the same box floored to 1.5 km returns 84 elements, 72 named), and `Chicago`'s box midpoint sits 10.06 km from the point Nominatim returned, which put every proposal in Archer Heights. |
+| §2 de-dupe | Same normalised name at any distance, **or** within 60 m *and* name affinity | 60 m of proximity on its own is not evidence: measured on a live 1.5 km box over the Loop it discarded 17 differently-named sites — "The Ledge" and "Color Factory" folded into "SkyDeck Chicago Willis Tower", and the whole Navy Pier funfair into "Centennial Wheel". What the rule is for is OSM carrying one site as a node *and* a way, which agree on the name or contain it. Whatever is still collapsed is now counted and shown ("n nearby duplicates hidden"). |
+| §2 "set a descriptive `User-Agent`" | Sent | Browsers drop it (forbidden header) and identify by `Referer`; under Node it is the difference between 200 and Nominatim's 403, which is how the live smoke test runs. |
+| — | Proposals already in the tour are listed **unticked** as *Already added* | Pre-ticking a stop the user already placed is how you get accidental duplicates. The match uses the same rule as the de-dupe above, so a neighbour 40 m away under an unrelated name is not reported as already added. |
+| §1 "a corrupt `#t=` falls back to the starter" | …and so does a payload that *repairs* to nothing | `parseTour` turns any JSON object into a valid empty tour, so `#t=` carrying `{"hello":"world"}` loaded a blank "Untitled tour", suppressed the starter, and then overwrote the address bar so the link could not be retried. A parse that recognised no `id`, no `title` and no usable route is now treated as a corrupt link (task t_cde077ad). |
+
+Not yet implemented from §2: the "widen the search" action, the truncation
+footnote when the list is capped at 12, and a Nominatim *pick-list* (the app
+takes the first match rather than offering candidates).
+

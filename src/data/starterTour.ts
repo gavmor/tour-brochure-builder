@@ -21,10 +21,13 @@
  *
  * Every stop carries a `category`, so the first thing a visitor sees is the
  * preset system doing something — a row of museum/viewpoint/park icons rather
- * than six identical 📍 pins (QA-BUG-7). The route's profile is deliberately
- * *not* set: `walking` is the default, the factories store a default as
- * absence to keep the share URL byte-free (§6), and the segmented control
- * already shows Walking as selected for a route without one.
+ * than six identical 📍 pins (QA-BUG-7).
+ *
+ * Note on the route profile: the walking intent is now modelled, not just
+ * described — `Route.profile` (ADR 0001) carries it, and `"foot"` is the
+ * default, which the schema stores as *absence*. So this route deliberately
+ * sets no `profile`: it routes on foot, and the starter's share URL stays as
+ * short as it was before road routing existed.
  */
 
 import {

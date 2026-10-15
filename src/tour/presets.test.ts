@@ -44,21 +44,22 @@ describe("colorName (§3b, QA-BUG-8)", () => {
 });
 
 describe("route profile (§3a)", () => {
-  it("defaults to walking and is omitted when default", () => {
+  it("defaults to foot and is omitted when default", () => {
+    // The *wording* is still "Walking"; the stored id is ADR 0001's `foot`.
     const route = createRoute();
     expect(route.profile).toBeUndefined();
-    expect(routeProfile(route)).toBe("walking");
-    expect(DEFAULT_ROUTE_PROFILE).toBe("walking");
+    expect(routeProfile(route)).toBe("foot");
+    expect(DEFAULT_ROUTE_PROFILE).toBe("foot");
   });
 
   it("keeps a non-default profile", () => {
-    const route = createRoute({ profile: "cycling" });
-    expect(route.profile).toBe("cycling");
-    expect(routeProfile(route)).toBe("cycling");
+    const route = createRoute({ profile: "bike" });
+    expect(route.profile).toBe("bike");
+    expect(routeProfile(route)).toBe("bike");
   });
 
   it("does not serialize the default profile", () => {
-    const route = createRoute({ profile: "walking" });
+    const route = createRoute({ profile: "foot" });
     expect(route.profile).toBeUndefined();
     expect(serializeTour(createTour({ routes: [route] }))).not.toContain(
       "profile",
@@ -131,7 +132,7 @@ describe("validation / repair", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.tour.routes[0].profile).toBeUndefined();
-    expect(routeProfile(result.tour.routes[0])).toBe("walking");
+    expect(routeProfile(result.tour.routes[0])).toBe("foot");
     expect(result.tour.routes[0].stops[0].category).toBeUndefined();
     expect(stopCategory(result.tour.routes[0].stops[0])).toBe("poi");
     expect(result.warnings.some((w) => w.includes("profile"))).toBe(true);
@@ -148,7 +149,7 @@ describe("validation / repair", () => {
           id: "r1",
           name: "Route 1",
           color: "#1E8449",
-          profile: "walking",
+          profile: "foot",
           stops: [{ id: "s1", lat: 1, lng: 2, title: "A", category: "poi" }],
         },
       ],
@@ -168,7 +169,7 @@ describe("URL round-trip (§6)", () => {
         createRoute({
           name: "Loop",
           color: "#2458A8",
-          profile: "cycling",
+          profile: "bike",
           stops: [
             createStop({
               lat: 41.88,
@@ -183,7 +184,7 @@ describe("URL round-trip (§6)", () => {
     const decoded = decodeTour(encodeTour(tour));
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
-    expect(decoded.tour.routes[0].profile).toBe("cycling");
+    expect(decoded.tour.routes[0].profile).toBe("bike");
     expect(decoded.tour.routes[0].stops[0].category).toBe("viewpoint");
   });
 
@@ -207,9 +208,50 @@ describe("URL round-trip (§6)", () => {
     if (!decoded.ok) return;
     const route = decoded.tour.routes[0];
     expect(route.profile).toBeUndefined();
-    expect(routeProfile(route)).toBe("walking");
+    expect(routeProfile(route)).toBe("foot");
     expect(stopCategory(route.stops[0])).toBe("poi");
     // The legacy hex color is preserved verbatim.
     expect(route.color).toBe("#C0392B");
+  });
+
+  /**
+   * The choice-first build shipped `walking` / `cycling` ids while the profile
+   * was still cosmetic. ADR 0001's routing work renamed them to `foot` /
+   * `bike` (the names the endpoints are keyed on), so links from that build
+   * must migrate rather than silently reset to walking.
+   */
+  it("migrates a pre-routing `walking` / `cycling` share URL", () => {
+    const legacy = {
+      version: 2,
+      id: "t_cosmetic",
+      title: "Shared before routing shipped",
+      routes: [
+        {
+          id: "r1",
+          name: "Ride",
+          color: "#2458A8",
+          profile: "cycling",
+          stops: [{ id: "s1", lat: 10, lng: 20, title: "A" }],
+        },
+        {
+          id: "r2",
+          name: "Stroll",
+          color: "#1E8449",
+          profile: "walking",
+          stops: [{ id: "s2", lat: 11, lng: 21, title: "B" }],
+        },
+      ],
+    };
+    const decoded = decodeTour(encodeTour(legacy as never));
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+
+    // `cycling` keeps its meaning under the new name...
+    expect(decoded.tour.routes[0].profile).toBe("bike");
+    // ...and `walking` is the default, so it collapses to absence.
+    expect(decoded.tour.routes[1].profile).toBeUndefined();
+    expect(routeProfile(decoded.tour.routes[1])).toBe("foot");
+    // A rename is not a repair: the author gets no warning for it.
+    expect(decoded.warnings).toEqual([]);
   });
 });

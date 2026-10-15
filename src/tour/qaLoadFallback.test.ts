@@ -6,19 +6,25 @@
  * Load order under test (see `initStore`):
  *   `#t=` share link  >  curated starter template  >  blank.
  *
- * There is no localStorage tier any more (D7 / ADR 0002), which is why the
- * storage-precedence cases this suite originally carried are gone — see the
- * "stale localStorage" test below for what replaced them, and the QA-BUG-4
- * note on task t_4ee2886f.
+ * Originally written by QA task t_9f25df7e against the localStorage-era store.
+ * Re-based onto the single-store model (ADR 0002, PR #3): `persistence.ts` is
+ * gone and no code path reads or writes localStorage, so the three
+ * storage-shaped cases — junk in storage, the QA-BUG-4 "non-tour blob in
+ * storage beats the starter" pin and its `it.fails` canary — describe a layer
+ * that no longer exists and are dropped rather than rewritten. The guard that
+ * replaces them is the last test here: a stale key from an older build is
+ * ignored outright. (CI also fails the build on `localStorage` in production
+ * code — `.test.` files are exempt.)
  *
- * These tests pin the *observed* behaviour so a regression is loud:
+ * The URL-shaped cases are the ones that still matter and are kept verbatim:
  * - a corrupt share link falls back to the curated starter rather than a blank
  *   or broken app, the decode error survives on the `InitResult`, *and* it is
  *   published to `lastLoadNotice` so the editor can show a banner (QA-BUG-2).
  * - a broken starter template still leaves an editable blank tour.
- * - a stale `tour-brochure-builder:tour` key from an older build is ignored.
  *
- * Added by QA task t_9f25df7e; ported to the URL-only store on t_4ee2886f.
+ * The QA-BUG-4 pin came back from task t_cde077ad as BUG-13, re-stated in
+ * post-ADR-0002 terms: the layer that used to carry a non-tour blob is the
+ * URL, not storage. See "repairs to zero recognised fields" below.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -35,12 +41,21 @@ import {
   tour,
   updateStop,
 } from "./store";
+import { encodeTour } from "./urlShare";
+import { parseTour } from "./validate";
 
-const STALE_KEY = "tour-brochure-builder:tour";
 const CORRUPT_HASH = "#t=NOT-A-REAL-PAYLOAD-%%%";
 
+/**
+ * The exact payload from the live repro: `{"hello":"world"}` through
+ * `compressToEncodedURIComponent`. It decompresses cleanly and is *not* a
+ * tour — `parseTour` repairs any JSON object into a valid empty one, which is
+ * what QA-BUG-4 / BUG-13 is about: this used to take the `url` branch, blank
+ * the app, and overwrite the address bar so the link could not be retried.
+ */
+const JUNK_HASH = "#t=N4IgFgpgNlD2IC4QHdYCcoBMQF8g";
+
 beforeEach(() => {
-  localStorage.clear();
   window.location.hash = "";
   resetStore();
 });
@@ -48,7 +63,6 @@ beforeEach(() => {
 afterEach(() => {
   stopUrlSync();
   stopHashWatcher();
-  localStorage.clear();
   window.location.hash = "";
   resetStore();
 });
@@ -63,7 +77,7 @@ function boot(options: { hash?: string } = {}) {
 }
 
 describe("fallback path: the app is never empty (epic item 5)", () => {
-  it("falls back to the curated starter when the URL carries nothing", () => {
+  it("falls back to the curated starter when there is no URL state", () => {
     const result = boot();
     expect(result.source).toBe("starter");
     expect(totalStops(tour.value)).toBe(6);
@@ -139,27 +153,62 @@ describe("fallback path: the app is never empty (epic item 5)", () => {
     expect(lastLoadNotice.value?.errors ?? []).toEqual([]);
   });
 
-  /**
-   * QA-BUG-4 (task t_9f25df7e) was "junk in localStorage beats the starter and
-   * yields a blank app". ADR 0002 deleted the localStorage tier outright, so
-   * the precedence it described no longer exists: nothing reads the key, and a
-   * blob left there by an older build — junk or a whole valid tour — cannot
-   * shadow the starter. This pins that, which is the fix.
-   */
-  it("ignores a stale localStorage blob from an older build (QA-BUG-4)", () => {
-    localStorage.setItem(STALE_KEY, JSON.stringify({ hello: "world" }));
-    const junk = boot();
-    expect(junk.source).toBe("starter");
-    expect(totalStops(tour.value)).toBe(6);
+  it("a #t= payload that repairs to zero recognised fields yields the curated starter (BUG-13)", () => {
+    // The live repro: `#t=N4IgFgpgNlD2IC4QHdYCcoBMQF8g`, i.e. `{"hello":"world"}`
+    // through `compressToEncodedURIComponent`. It decompressed, `parseTour`
+    // repaired it into a valid empty tour, and `initStore` took the `url`
+    // branch — empty map, "Untitled tour", 0 stops, no notice.
+    const result = boot({ hash: JUNK_HASH });
 
-    resetStore();
-    localStorage.setItem(
-      STALE_KEY,
-      JSON.stringify({ ...starterTour(), id: "tour_stale", title: "Stale" }),
-    );
-    const valid = boot();
-    expect(valid.source).toBe("starter");
+    expect(result.source).toBe("starter");
     expect(tour.value.title).toBe("Chicago Downtown Walking Tour");
+    expect(totalStops(tour.value)).toBe(6);
+    // And the failure is reported, so the UI has something to hang a notice on.
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.join(" ")).toMatch(/did not contain a tour/i);
+  });
+
+  it("the discriminator is 'nothing was recognised', not 'something was repaired'", () => {
+    // A real tour that needs repairs still loads: only a payload where every
+    // identifying field had to be invented is rejected.
+    const junk = parseTour({ hello: "world" });
+    expect(junk.ok).toBe(true);
+    expect(junk.ok && junk.recognised).toEqual([]);
+
+    const sparse = parseTour({
+      title: "Someone's tour",
+      routes: [{ name: "Walk", stops: [{ lat: 41.88, lng: -87.63 }] }],
+    });
+    expect(sparse.ok && sparse.recognised).toEqual(["title", "routes"]);
+    expect(sparse.ok && sparse.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("an empty-but-identified tour from a link still loads", () => {
+    // Someone who deleted every stop and shared the link gets their tour, not
+    // the starter: `id` and `title` identify it even with no routes.
+    const encoded = encodeTour({
+      version: 2,
+      id: "tour-1",
+      title: "Deliberately empty",
+      routes: [],
+    } as never);
+    const result = boot({ hash: `#t=${encoded}` });
+    expect(result.source).toBe("url");
+    expect(tour.value.title).toBe("Deliberately empty");
+  });
+
+  it("ignores a stale localStorage key left by an older build (ADR 0002)", () => {
+    // The pre-PR#3 autosave key. A returning visitor who still has it must get
+    // the curated starter, not a resurrected empty tour (the blank-map bug).
+    localStorage.setItem(
+      "tour-brochure-builder:tour",
+      JSON.stringify({ version: 2, id: "t", title: "Stale", routes: [] }),
+    );
+    const result = boot();
+    expect(result.source).toBe("starter");
+    expect(tour.value.title).toBe("Chicago Downtown Walking Tour");
+    expect(totalStops(tour.value)).toBe(6);
+    localStorage.clear();
   });
 });
 

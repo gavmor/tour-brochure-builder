@@ -115,6 +115,7 @@ by id (so typing in the title field does not tear down every marker).
 |------|---------------|
 | `Editor.tsx` | Shell: tour title/subtitle/tagline, Add-stop and Fit controls, read-only banner. |
 | `MapEditor.tsx` | The Leaflet map: tiles, markers, one polyline per route, shape handles, bounds fitting. |
+| `NearbyPanel.tsx` | "Add sites near a location": the pre-selected proposal checklist (see below). |
 | `Itinerary.tsx` | Per-route stop lists: SortableJS drag-reorder, up/down buttons, delete. |
 | `StopPanel.tsx` | Edit panel for the selected stop: title, blurb, description, image URL + preview, coordinates, route. |
 | `RoutePanel.tsx` | Add / rename / recolor / delete a route and toggle shape points. |
@@ -149,6 +150,59 @@ explanation if the image fails to load.
 The OSM attribution is part of the tile layer, so it is present wherever the
 map is: it is a licence term, not decoration. Tile `maxZoom` is 19 and nothing
 prefetches tiles.
+
+## "Add sites near a location" (`src/poi/`)
+
+The choice-first way to fill a tour: instead of typing coordinates, name a
+place (or drop a pin on the map) and get up to twelve notable OpenStreetMap
+sites back **already selected** — untick the ones you do not want and press
+*Add*. Accepted proposals go through the store's ordinary `addStop()`, so they
+are indistinguishable from stops placed by hand: same edit, delete, reorder and
+share-URL behaviour, with no `seeded`, `locked` or `source` flag anywhere.
+
+| File | What it holds |
+|------|---------------|
+| `osm.ts` | Pure: bbox maths, the Overpass QL, Nominatim parsing, ranking/dedupe, and the OSM-tags → `StopCategory` mapping. No fetch, no DOM. |
+| `net.ts` | Fetch, cancellation, timeouts, the Nominatim rate gate, session caching, mirror fallback and the outage memo. |
+| `curated.ts` | The offline fallback, derived from the curated starter tour so the two cannot drift. |
+
+Everything the free OSM services oblige us to do is in this layer, not left to
+the UI:
+
+- **On demand only.** Nothing is queried on load — a first visit renders the
+  curated starter with zero network calls (`docs/choice-first-ux.md` §1).
+- **One request at a time**, at least 1 s between Nominatim calls, a bbox
+  clamped to 0.10° (~11 km — measured: 0.25° of Porto was refused by the
+  canonical instance after ~9 s, 0.10° answered in under 3 s), and
+  `[timeout:25]` inside the query itself.
+- **One shared deadline (20 s)** for the whole proposal step, geocode plus
+  Overpass, with a visible Cancel throughout. Mirrors are **hedged, not raced**:
+  the next one is only brought in after 4 s of silence, with the earlier request
+  still running, and losers are aborted the moment someone answers — so a mirror
+  that is merely slow still wins, and the extra load only lands when one is
+  being slow. A total outage is remembered for a minute, so a repeat search
+  falls back instantly instead of waiting the deadline out again.
+- **Never a dead end.** Offline, rate-limited, no match, nothing found: the
+  curated Chicago set appears instead, with the reason shown and a *Try
+  OpenStreetMap again* button. Sites already in the tour are listed unticked as
+  *Already added*, so a second search cannot silently duplicate stops.
+- **Attribution** for Overpass/Nominatim is shown in the dialog, next to the
+  results it applies to.
+
+Session caching uses `sessionStorage`, keyed by the normalised query. That is a
+cache for someone else's API, not app state — the tour still lives only in the
+URL (ADR 0002), and losing the cache costs one refetch.
+
+A live smoke test against the real services is kept out of CI, like the routing
+one:
+
+```sh
+POI_LIVE=1 pnpm vitest run src/poi/live.test.ts
+```
+
+Run it when the endpoint list, the query or the latency budget is in doubt. A
+failure there means the free OSM services were unreachable from that network —
+which is the condition the curated fallback exists for, not a broken build.
 
 ## Deployment
 
