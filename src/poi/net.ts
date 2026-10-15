@@ -164,6 +164,17 @@ export function resetNominatimGate(): void {
 
 // ------------------------------------------------------------------- fetch
 
+/**
+ * Identifies this app to the OSM services, as their usage policies require.
+ *
+ * Browsers forbid setting `User-Agent` and silently drop it — there a request
+ * is identified by its `Referer`, which the browser sends for us. Outside a
+ * browser (the live smoke test, any Node consumer) it is the difference
+ * between a 200 and Nominatim's 403 for unidentified clients.
+ */
+const USER_AGENT =
+  "tour-brochure-builder/0.1 (+https://github.com/gavmor/tour-brochure-builder)";
+
 export class PoiNetworkError extends Error {
   readonly kind:
     | "timeout"
@@ -281,7 +292,7 @@ export async function geocode(
 
   const response = await fetchWithTimeout(
     nominatimUrl(query),
-    {},
+    { headers: { "User-Agent": USER_AGENT } },
     budget,
     signal,
   );
@@ -299,8 +310,19 @@ export async function geocode(
 // ------------------------------------------------------------------- POIs
 
 /**
- * Query Overpass for sites inside a bbox, trying each mirror until one
- * answers. Returns the ranked, deduped proposal list.
+ * Query Overpass for sites inside a bbox.
+ *
+ * Mirrors are **hedged, not raced**: the first is asked straight away, and the
+ * next is only brought in if that one has not answered within `hedgeDelayMs` —
+ * with the first request still running, because a mirror that is merely slow
+ * should still be allowed to win. Losers are aborted the moment someone
+ * answers, so the extra load only lands while a mirror is being slow, never on
+ * every query. The whole thing is bounded by one shared deadline.
+ *
+ * (The spike split the deadline evenly across the mirrors instead. That is
+ * tidier but wrong: it guarantees failure whenever the only healthy mirror is
+ * slower than its slice — exactly what happened in testing, where one mirror
+ * answered in ~20 s and the other two were dead.)
  */
 export async function findPois(
   bbox: BBox,
@@ -329,62 +351,132 @@ export async function findPois(
 
   const deadline = resolveDeadline(deadlineAt);
   const query = buildOverpassQuery(clampBbox(bbox));
-  let lastError: unknown = null;
-
-  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i += 1) {
-    const endpoint = OVERPASS_ENDPOINTS[i];
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      lastError =
-        lastError ??
-        new PoiNetworkError("timeout", "Overpass deadline exceeded");
-      break;
-    }
-    // Split what is left of the shared deadline across the mirrors not yet
-    // tried: one that fails fast hands its unused budget to the next.
-    const budget = Math.min(
-      DEFAULTS.fetchTimeoutMs,
-      Math.ceil(remaining / (OVERPASS_ENDPOINTS.length - i)),
-    );
-    try {
-      const response = await fetchWithTimeout(
-        endpoint,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: overpassBody(query),
-        },
-        budget,
-        signal,
-      );
-      if (!response.ok) {
-        lastError = new PoiNetworkError(
-          "http",
-          `Overpass HTTP ${response.status}`,
-        );
-        continue;
-      }
-      const json = (await response.json()) as { elements?: unknown };
-      if (!json || !Array.isArray(json.elements)) {
-        lastError = new PoiNetworkError("payload", "Overpass sent no elements");
-        continue;
-      }
-      const candidates = rankAndDedupe(json.elements, { topN });
-      if (key) cacheSet(key, candidates);
-      forgetOutage(); // Overpass is answering again.
-      return { candidates, cached: false, endpoint };
-    } catch (error) {
-      lastError = error;
-      // A user cancellation is not a reason to try the next mirror, and must
-      // not be remembered as an outage.
-      if (isCancellation(error) || signal?.aborted) throw error;
-    }
+  /** Aborts every attempt still in flight: a winner, a cancel, or the deadline. */
+  const hedge = new AbortController();
+  const stopAll = () => hedge.abort();
+  if (signal) {
+    if (signal.aborted) throw new PoiNetworkError("cancelled", "cancelled");
+    signal.addEventListener("abort", stopAll, { once: true });
   }
 
+  let lastError: unknown = null;
+
+  const ask = async (endpoint: string): Promise<PoiResult> => {
+    // The shared deadline is the only cap that matters here: capping each
+    // attempt at `fetchTimeoutMs` as well would cut off exactly the slow but
+    // healthy mirror that hedging exists to let win.
+    const budget = Math.max(1, deadline - Date.now());
+    const response = await fetchWithTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": USER_AGENT,
+        },
+        body: overpassBody(query),
+      },
+      budget,
+      hedge.signal,
+    );
+    if (!response.ok) {
+      throw new PoiNetworkError("http", `Overpass HTTP ${response.status}`);
+    }
+    // An overloaded Overpass answers 200 with an XML error document, not JSON.
+    // Read the body once and say so plainly, rather than letting a parser
+    // error ("Unexpected token '<'") reach the user.
+    const body = await response.text();
+    let json: { elements?: unknown };
+    try {
+      json = JSON.parse(body) as { elements?: unknown };
+    } catch {
+      throw new PoiNetworkError(
+        "payload",
+        "Overpass returned an error page (it is probably overloaded)",
+      );
+    }
+    if (!json || !Array.isArray(json.elements)) {
+      throw new PoiNetworkError("payload", "Overpass sent no elements");
+    }
+    return {
+      candidates: rankAndDedupe(json.elements, { topN }),
+      cached: false,
+      endpoint,
+    };
+  };
+
+  const finish = (result: PoiResult): PoiResult => {
+    if (key) cacheSet(key, result.candidates);
+    forgetOutage(); // Overpass is answering again.
+    return result;
+  };
+
+  const attempts: Promise<PoiResult>[] = [];
+  try {
+    for (let i = 0; i < OVERPASS_ENDPOINTS.length; i += 1) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      attempts.push(
+        ask(OVERPASS_ENDPOINTS[i]).catch((error) => {
+          lastError = error;
+          throw error;
+        }),
+      );
+      if (i === OVERPASS_ENDPOINTS.length - 1) break;
+
+      // Bring in the next mirror after the stagger — or at once if everything
+      // in flight has already failed. Never wait past the deadline.
+      const stagger = Math.min(
+        DEFAULTS.hedgeDelayMs,
+        Math.max(0, remaining / OVERPASS_ENDPOINTS.length),
+      );
+      const early = await Promise.race([
+        anySettled(attempts),
+        sleep(stagger).then(() => "stagger" as const),
+      ]);
+      if (early !== "stagger" && early !== null) return finish(early);
+      if (hedge.signal.aborted) break;
+    }
+
+    const winner = await anySettled(attempts);
+    if (winner) return finish(winner);
+  } finally {
+    signal?.removeEventListener("abort", stopAll);
+    stopAll(); // whoever lost is no longer wanted
+  }
+
+  if (isCancellation(lastError) || signal?.aborted) {
+    throw lastError ?? new PoiNetworkError("cancelled", "cancelled");
+  }
   rememberOutage(lastError);
   throw (
     lastError ?? new PoiNetworkError("http", "every Overpass mirror failed")
   );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * The first attempt to succeed, or `null` once they have all failed. Unlike
+ * `Promise.any`/`race` this never rejects, so one mirror failing fast cannot
+ * end the wait for a slower one that is still going.
+ */
+function anySettled(attempts: Promise<PoiResult>[]): Promise<PoiResult | null> {
+  if (attempts.length === 0) return Promise.resolve(null);
+  let left = attempts.length;
+  return new Promise<PoiResult | null>((resolve) => {
+    for (const attempt of attempts) {
+      attempt.then(
+        (value) => resolve(value),
+        () => {
+          left -= 1;
+          if (left === 0) resolve(null);
+        },
+      );
+    }
+  });
 }
 
 /** The real service. The UI takes this as a default so tests can swap it. */

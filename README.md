@@ -172,12 +172,16 @@ the UI:
 - **On demand only.** Nothing is queried on load — a first visit renders the
   curated starter with zero network calls (`docs/choice-first-ux.md` §1).
 - **One request at a time**, at least 1 s between Nominatim calls, a bbox
-  clamped to ~0.25°, and `[timeout:25]` inside the query itself.
-- **One shared deadline (12 s)** for the whole proposal step, geocode plus
-  Overpass. The mirrors are tried in order rather than raced — racing would
-  triple the load on free community instances — so each gets a slice of what is
-  left. A total outage is remembered for a minute, so a repeat search falls back
-  instantly instead of waiting the deadline out again.
+  clamped to 0.10° (~11 km — measured: 0.25° of Porto was refused by the
+  canonical instance after ~9 s, 0.10° answered in under 3 s), and
+  `[timeout:25]` inside the query itself.
+- **One shared deadline (20 s)** for the whole proposal step, geocode plus
+  Overpass, with a visible Cancel throughout. Mirrors are **hedged, not raced**:
+  the next one is only brought in after 4 s of silence, with the earlier request
+  still running, and losers are aborted the moment someone answers — so a mirror
+  that is merely slow still wins, and the extra load only lands when one is
+  being slow. A total outage is remembered for a minute, so a repeat search
+  falls back instantly instead of waiting the deadline out again.
 - **Never a dead end.** Offline, rate-limited, no match, nothing found: the
   curated Chicago set appears instead, with the reason shown and a *Try
   OpenStreetMap again* button. Sites already in the tour are listed unticked as
@@ -188,6 +192,17 @@ the UI:
 Session caching uses `sessionStorage`, keyed by the normalised query. That is a
 cache for someone else's API, not app state — the tour still lives only in the
 URL (ADR 0002), and losing the cache costs one refetch.
+
+A live smoke test against the real services is kept out of CI, like the routing
+one:
+
+```sh
+POI_LIVE=1 pnpm vitest run src/poi/live.test.ts
+```
+
+Run it when the endpoint list, the query or the latency budget is in doubt. A
+failure there means the free OSM services were unreachable from that network —
+which is the condition the curated fallback exists for, not a broken build.
 
 ## Deployment
 

@@ -49,12 +49,20 @@ export const DEFAULTS = {
   /**
    * One shared budget for the whole "propose sites" step (geocode + Overpass).
    *
-   * The mirrors are tried in order rather than raced — racing would triple the
-   * load on free community instances for every query — but they share this
-   * deadline instead of each getting its own `fetchTimeoutMs`, so a total
-   * outage costs ~12 s before the curated fallback appears, not 3 × 10 s.
+   * Sized from measurement, not taste: from a development network the only
+   * reachable mirror answered a small bbox in ~20 s (the canonical instance
+   * rate-limited us, the second timed out). A 12 s budget therefore *always*
+   * fell back, however healthy the data was. 20 s with a visible Cancel, and
+   * the curated set waiting at the end, beats pretending OSM is down.
    */
-  proposalDeadlineMs: 12_000,
+  proposalDeadlineMs: 20_000,
+  /**
+   * How long to wait for a mirror before *also* trying the next one, keeping
+   * the earlier request alive (hedging). A mirror that is merely slow still
+   * wins; one that is dead costs this much, not the whole budget. Scaled down
+   * automatically when the remaining budget is smaller.
+   */
+  hedgeDelayMs: 4_000,
   /**
    * How long a total Overpass outage is remembered for (per session). Without
    * this, every repeat of a query made during an outage pays the full deadline
@@ -134,9 +142,12 @@ export function bboxFromCenter(
 
 /**
  * A city bbox from Nominatim can span a whole metro area; a single Overpass
- * query over that is both slow and rude. Clamp it around its centre.
+ * query over that is both slow and rude — measured against the canonical
+ * instance, 0.25° of Porto was refused with a server-side timeout after ~9 s,
+ * while 0.10° (~11 km across, which is as far as anyone walks a brochure tour)
+ * came back in under 3 s. Clamp around the centre.
  */
-export function clampBbox(bbox: BBox, maxSpanDeg = 0.25): BBox {
+export function clampBbox(bbox: BBox, maxSpanDeg = 0.1): BBox {
   const cLat = (bbox.south + bbox.north) / 2;
   const cLng = (bbox.west + bbox.east) / 2;
   const halfLat = Math.min((bbox.north - bbox.south) / 2, maxSpanDeg / 2);

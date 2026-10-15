@@ -56,7 +56,28 @@ function installFetch(
 }
 
 function ok(json: unknown) {
-  return { ok: true, status: 200, json: async () => json };
+  // The Overpass path reads `.text()` (an overloaded instance answers 200 with
+  // an XML error page); the Nominatim path reads `.json()`.
+  const body = JSON.stringify(json);
+  return {
+    ok: true,
+    status: 200,
+    json: async () => json,
+    text: async () => body,
+  };
+}
+
+/** A 200 whose body is not JSON — what an overloaded Overpass actually sends. */
+function errorPage() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => {
+      throw new SyntaxError("Unexpected token '<'");
+    },
+    text: async () =>
+      '<?xml version="1.0"?><osm-derived><remark>runtime error</remark></osm-derived>',
+  };
 }
 
 /** A request that only the caller's own timeout (or a cancel) can end. */
@@ -128,6 +149,20 @@ describe("failures are reported, not swallowed", () => {
     expect(calls).toHaveLength(2); // stopped at the first mirror that worked
   });
 
+  it("treats an Overpass error page as a failure, in plain words", async () => {
+    installFetch(async (url) =>
+      url === OVERPASS_ENDPOINTS[0] ? errorPage() : ok(ONE_GOOD_RESULT),
+    );
+    const { candidates, endpoint } = await findPois(BBOX);
+    expect(candidates).toHaveLength(1);
+    expect(endpoint).toBe(OVERPASS_ENDPOINTS[1]);
+
+    // And when every mirror does it, the message says what happened rather
+    // than leaking "Unexpected token '<'".
+    installFetch(async () => errorPage());
+    await expect(findPois(BBOX)).rejects.toThrow(/error page/);
+  });
+
   it("describes a failure in words the UI can show", () => {
     expect(describeError(new PoiNetworkError("timeout", "x"))).toBe(
       "timed out",
@@ -194,6 +229,55 @@ describe("session cache", () => {
   });
 });
 
+describe("hedged mirrors", () => {
+  /** A fetch where each endpoint answers after its own delay. */
+  function installTimedFetch(delays: Record<string, number>): void {
+    installFetch(
+      (url, init) =>
+        new Promise((resolve, reject) => {
+          const signal = init?.signal;
+          const ms = delays[url];
+          const timer =
+            ms === undefined
+              ? null
+              : setTimeout(() => resolve(ok(ONE_GOOD_RESULT)), ms);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              if (timer) clearTimeout(timer);
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        }),
+    );
+  }
+
+  it("lets a slow but healthy mirror win instead of timing it out", async () => {
+    // The first mirror is slower than its 1/3 share of the budget. Under the
+    // old even split it could never answer; hedged, it still wins.
+    installTimedFetch({ [OVERPASS_ENDPOINTS[0]]: 450 });
+    const started = Date.now();
+    const result = await findPois(BBOX, { deadlineAt: Date.now() + 900 });
+
+    expect(result.endpoint).toBe(OVERPASS_ENDPOINTS[0]);
+    expect(result.candidates).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(900);
+  });
+
+  it("brings in the next mirror when the first is slow, and takes the first answer", async () => {
+    installTimedFetch({
+      // The first never answers; the second does, once hedged in.
+      [OVERPASS_ENDPOINTS[1]]: 50,
+    });
+    const result = await findPois(BBOX, { deadlineAt: Date.now() + 900 });
+
+    expect(result.endpoint).toBe(OVERPASS_ENDPOINTS[1]);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(recentOutage()).toBeNull();
+  });
+});
+
 describe("the documented latency budget (QA-BUG-3)", () => {
   it("keeps the per-request and politeness constants within policy", () => {
     expect(DEFAULTS.fetchTimeoutMs).toBeLessThanOrEqual(10_000);
@@ -203,10 +287,13 @@ describe("the documented latency budget (QA-BUG-3)", () => {
 
   it("beats the serial-timeout worst case by a wide margin", () => {
     const oldWorstCase = DEFAULTS.fetchTimeoutMs * OVERPASS_ENDPOINTS.length;
-    expect(DEFAULTS.proposalDeadlineMs).toBeLessThanOrEqual(12_000);
+    expect(DEFAULTS.proposalDeadlineMs).toBeLessThanOrEqual(20_000);
     expect(DEFAULTS.proposalDeadlineMs).toBeGreaterThanOrEqual(5_000);
     expect(DEFAULTS.proposalDeadlineMs).toBeLessThan(oldWorstCase);
     expect(DEFAULTS.outageMemoMs).toBeGreaterThanOrEqual(30_000);
+    // A hedged mirror must be brought in well inside the budget, or hedging
+    // is decoration.
+    expect(DEFAULTS.hedgeDelayMs).toBeLessThan(DEFAULTS.proposalDeadlineMs / 2);
   });
 
   it("spends one shared deadline on a total outage, not one per mirror", async () => {
