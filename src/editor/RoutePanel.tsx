@@ -19,6 +19,7 @@ import {
   activeRouteId,
   addRoute,
   COLOR_SWATCHES,
+  colorName,
   DEFAULT_ROUTE_COLOR,
   DEFAULT_ROUTE_PROFILE,
   deleteRoute,
@@ -31,6 +32,22 @@ import {
 import { safeColor } from "./markers";
 import { approximateReason, geometryFor } from "./routeGeometry";
 import { shapeMode } from "./uiState";
+
+/**
+ * Route controls: pick the route being edited, rename it, choose its travel
+ * profile and color from reversible presets, add or delete one, and toggle the
+ * shape-point handles.
+ *
+ * Choice-first UX (§3a/§3b): the travel profile is a segmented control and the
+ * color is a swatch palette — no free-text/hex entry in the primary UI. Both
+ * are reversible: the profile defaults to walking and the color has an explicit
+ * reset. A "Custom color" disclosure keeps an escape hatch without putting a
+ * raw input in the main flow.
+ *
+ * SPEC §5.7 left v1 multi-route editing as a scope call with "ship it" as the
+ * recommendation — two routes and a legend are the whole point of the
+ * reference brochure, so it ships.
+ */
 
 export function RoutePanel() {
   const current = tour.value;
@@ -133,6 +150,7 @@ export function RoutePanel() {
         <div class="swatches">
           {COLOR_SWATCHES.map((preset) => {
             const on = preset.toLowerCase() === color.toLowerCase();
+            const name = colorName(preset);
             return (
               <button
                 key={preset}
@@ -141,8 +159,10 @@ export function RoutePanel() {
                 style={{ background: preset }}
                 aria-pressed={on}
                 disabled={locked}
-                aria-label={`Use ${preset}`}
-                title={preset}
+                // A swatch is a color, not a hex code: a screen reader should
+                // say "Use green", not spell out 1E8449 (QA-BUG-8).
+                aria-label={`Use ${name}`}
+                title={`${name} (${preset})`}
                 onClick={() => updateRoute(active.id, { color: preset })}
               >
                 {on ? (

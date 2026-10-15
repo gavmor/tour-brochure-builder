@@ -9,9 +9,11 @@
 import { useEffect } from "preact/hooks";
 import { editCopyFlow, showBrochure } from "../appState";
 import {
+  canRestoreStarter,
   lastLoadNotice,
   newTour,
   readOnly,
+  resetToFallback,
   setTourMeta,
   stopCount,
   tour,
@@ -37,25 +39,42 @@ export function Editor() {
   const armed = addMode.value;
   const notice = lastLoadNotice.value;
   const hasStops = stopCount.value > 0;
+  const canRestore = canRestoreStarter.value;
+
+  const ask = (message: string) =>
+    typeof window === "undefined" ? true : window.confirm(message);
 
   // "Start blank": back out of the curated starter template (or any tour) into
-  // an empty editable tour. There is no undo, so confirm first (task
-  // t_d7de7a2a). `newTour()` goes through the normal store path, so the URL
-  // writer encodes the empty tour into the hash and a reload stays blank.
+  // an empty editable tour. It discards whatever is on screen, so confirm
+  // first (task t_d7de7a2a) — but it is no longer a one-way door: "Restore
+  // starter tour" below brings the template back (QA-BUG-5). `newTour()` goes
+  // through the normal store path, so the URL writer encodes the empty tour
+  // into the hash and a reload stays blank.
   const startBlank = () => {
-    const ask =
-      typeof window === "undefined"
-        ? () => true
-        : (message: string) => window.confirm(message);
     if (
       hasStops &&
       !ask(
         "Clear all stops and start from a blank tour? " +
-          "This cannot be undone — copy the share link first if you want to keep this tour.",
+          "You can put the starter tour back, but your own edits to it will be gone — " +
+          "copy the share link first if you want to keep them.",
       )
     )
       return;
     newTour();
+  };
+
+  // The way back from "Start blank", and from any amount of editing: the same
+  // hydration path a bare URL takes. Only confirms when there is work to lose.
+  const restoreStarter = () => {
+    if (
+      hasStops &&
+      !ask(
+        "Replace this tour with the curated starter tour? " +
+          "Your current stops will be gone — copy the share link first if you want to keep them.",
+      )
+    )
+      return;
+    resetToFallback();
   };
 
   // Escape is the universal "stop what you are doing" key; without it, armed
@@ -157,6 +176,18 @@ export function Editor() {
           >
             Start blank
           </button>
+          <button
+            type="button"
+            onClick={restoreStarter}
+            disabled={locked || !canRestore}
+            title={
+              canRestore
+                ? "Put the curated starter tour back"
+                : "This already is the starter tour"
+            }
+          >
+            Restore starter tour
+          </button>
           {/* The view switch (SPEC §3). The brochure owns Print, Copy share
               link and the printed legend; this is the way in. */}
           <button
@@ -186,7 +217,22 @@ export function Editor() {
 
       {notice && notice.errors.length > 0 ? (
         <div class="editor__banner editor__banner--error" role="alert">
-          <span>Could not load that tour: {notice.errors.join(" ")}</span>
+          <span>
+            {notice.fallback === "starter"
+              ? "That share link could not be read — showing the starter tour."
+              : notice.fallback === "new"
+                ? "That share link could not be read — showing a blank tour."
+                : "Could not load that tour:"}{" "}
+            <span class="editor__banner-detail">{notice.errors.join(" ")}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              lastLoadNotice.value = null;
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 

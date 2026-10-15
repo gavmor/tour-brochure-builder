@@ -57,6 +57,33 @@ describe("RoutePanel preset controls", () => {
     expect(on[0].getAttribute("aria-pressed")).toBe("true");
   });
 
+  /**
+   * QA-BUG-8: the swatches labelled themselves `Use #1E8449`, so a
+   * screen-reader user heard a hex string instead of a color.
+   */
+  it("announces each swatch by name, not by hex code", () => {
+    const labels = Array.from(host.querySelectorAll(".swatch")).map((b) =>
+      b.getAttribute("aria-label"),
+    );
+    expect(labels).toEqual([
+      "Use green",
+      "Use red",
+      "Use navy",
+      "Use amber",
+      "Use violet",
+      "Use teal",
+      "Use blue",
+      "Use magenta",
+      "Use brown",
+      "Use slate",
+    ]);
+    for (const label of labels) expect(label).not.toMatch(/#/);
+    // The hex stays available on hover, where it is read, not spoken.
+    expect(host.querySelector(".swatch")?.getAttribute("title")).toBe(
+      "green (#1E8449)",
+    );
+  });
+
   it("keeps hex/color entry out of the primary UI (behind a disclosure)", () => {
     // No free-text input for the color.
     const textInputs = Array.from(

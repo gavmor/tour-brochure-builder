@@ -38,6 +38,7 @@ import {
 import { type LatLng, routeLatLngs } from "./shape";
 import {
   addMode,
+  coordBlurb,
   fitRequest,
   hiddenRouteIds,
   nearbyCenter,
@@ -159,11 +160,14 @@ export function MapEditor() {
       const live = tour.peek();
       const route =
         live.routes.find((r) => r.id === activeId) ?? live.routes[0];
+      const position = { lat: round6(lat), lng: round6(lng) };
       const stop = addStop(
         {
-          lat: round6(lat),
-          lng: round6(lng),
+          ...position,
           title: `Stop ${(route?.stops.length ?? 0) + 1}`,
+          // Never hand back an empty field (§3): the coordinates are a true,
+          // editable starting line for the itinerary column (QA-BUG-6).
+          blurb: coordBlurb(position.lat, position.lng),
         },
         route?.id,
       );

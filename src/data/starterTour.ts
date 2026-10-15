@@ -19,6 +19,10 @@
  * sensibly on first load. The tour ships with a stable `id` so an untouched
  * starter round-trips deterministically through save/share.
  *
+ * Every stop carries a `category`, so the first thing a visitor sees is the
+ * preset system doing something — a row of museum/viewpoint/park icons rather
+ * than six identical 📍 pins (QA-BUG-7).
+ *
  * Note on the route profile: the walking intent is now modelled, not just
  * described — `Route.profile` (ADR 0001) carries it, and `"foot"` is the
  * default, which the schema stores as *absence*. So this route deliberately
