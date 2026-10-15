@@ -76,6 +76,7 @@ describe("starterTour template", () => {
       "blurb",
       "description",
       "imageUrl",
+      "category",
     ]);
     for (const route of t.routes) {
       for (const stop of route.stops) {

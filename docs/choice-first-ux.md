@@ -238,3 +238,27 @@ Route is cycling, green; first stop is a museum. A tour using all defaults (walk
 - **t_0e197ca6 (POI proposal flow):** implement §2 exactly — Nominatim pick-list geocode, the Overpass QL above, N=12 ranking, all-preselected trim list, the three UI states, append-not-replace, de-dupe, in-session caching + debounce.
 - **t_4c696e9d (choice-first controls):** implement §3 controls and §6 serialization; remove manual lat/lng from the primary UI; keep marker-drag + map-click add.
 - **t_9f25df7e (verify):** check against the acceptance checklist and R1–R3.
+
+---
+
+## Implementation status (task t_40ec912a)
+
+All three features now ship from one codebase; §2 landed last, ported from the
+`~/Documents/tour-builder` spike into `src/poi/` + `src/editor/NearbyPanel.tsx`.
+Where the shipped behaviour differs from the spec above, the spec is the older
+document and this list is the record:
+
+| Spec | Shipped | Why |
+|------|---------|-----|
+| §1 load order `URL → localStorage → starter` | `URL → starter` | localStorage was removed outright by [ADR 0002](adr/0002-url-sole-source-of-truth.md); the hash is the only store. |
+| §2 debounce Nominatim typing (≥500 ms) | No typing-triggered geocode at all | Geocoding runs only on *Search*/<kbd>Enter</kbd>. Stricter than the policy asks: zero requests per keystroke. |
+| §2 empty-result offers "widen to 5 km" | Offers the curated set | Same promise (never a dead end, R1) through the one mechanism that also covers offline and rate-limited. A radius widener is still worth adding. |
+| §2 "Nominatim and Overpass failures reported separately" | Separate messages, one retry | `Could not find "X"` vs `Could not reach OpenStreetMap (…)`, each with the curated list beneath it. |
+| §2 per-request timeout | One **12 s deadline for the whole step**, mirrors tried in order within it, plus a 60 s outage memo | A per-request timeout cost 3 × 10 s of spinner before the fallback appeared (QA-BUG-3 against the spike). |
+| §2 "set a descriptive `User-Agent`" | Not set | Browsers forbid it; Nominatim identifies a web app by `Referer`, which the browser sends. |
+| — | Proposals already in the tour are listed **unticked** as *Already added* | Pre-ticking a stop the user already placed is how you get accidental duplicates. |
+
+Not yet implemented from §2: the "widen the search" action, the truncation
+footnote when the list is capped at 12, and a Nominatim *pick-list* (the app
+takes the first match rather than offering candidates).
+
