@@ -99,6 +99,28 @@ test.describe("map tap-to-add", () => {
     // The stop is still usable: it is the one selected and being edited.
     await expect(page.locator(".itinerary-row--selected")).toHaveCount(1);
     await expect(rows.nth(countBefore)).toHaveClass(/itinerary-row--selected/);
-    await expect(page.getByTestId("stop-panel")).toBeVisible();
+    const panel = page.getByTestId("stop-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByLabel("Title")).toBeEditable();
+
+    // …and it landed under the finger, not somewhere else. The selected
+    // stop's marker is a 28×28 divIcon anchored at its centre (see
+    // `stopIcon` in src/editor/markers.ts), so its box centre *is* the
+    // projected point. Same viewport frame as `point`, because the page
+    // did not scroll — which is the whole claim above.
+    const newMarker = page.locator(
+      ".leaflet-marker-icon:has(.stop-badge--selected)",
+    );
+    await expect(newMarker).toHaveCount(1);
+    const markerBox = await newMarker.boundingBox();
+    if (!markerBox) throw new Error("The new marker has no layout box.");
+    const drift = Math.hypot(
+      markerBox.x + markerBox.width / 2 - point.x,
+      markerBox.y + markerBox.height / 2 - point.y,
+    );
+    expect(
+      drift,
+      `The new stop's marker is ${drift.toFixed(1)}px from the tapped point.`,
+    ).toBeLessThanOrEqual(4);
   });
 });
