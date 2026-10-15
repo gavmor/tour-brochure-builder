@@ -17,10 +17,16 @@ import {
   fixLeafletDefaultIcons,
 } from "../editor/leafletSetup";
 import { badgeSignature, safeColor, stopIcon } from "../editor/markers";
+import {
+  APPROXIMATE_DASH,
+  routeDrawBounds,
+  routeGeometry,
+  routingAttributionHtml,
+  syncRouteGeometry,
+} from "../editor/routeGeometry";
 import { routeLatLngs } from "../editor/shape";
 import { hiddenRouteIds } from "../editor/uiState";
 import { findStop, selectedStopId, type Tour, tour } from "../tour";
-import { tourPoints } from "./content";
 import {
   isPrintFlowActive,
   printPrep,
@@ -29,8 +35,17 @@ import {
   whenTilesSettled,
 } from "./printing";
 
+/**
+ * Every point the brochure draws. Road geometry is included so a route that
+ * swings outside its stops' bounding box — a one-way loop, a bridge approach
+ * — is not clipped off the printed map.
+ */
+function brochurePoints(current: Tour): [number, number][] {
+  return current.routes.flatMap(routeDrawBounds);
+}
+
 function fitToTour(map: L.Map, current: Tour): void {
-  const points = tourPoints(current);
+  const points = brochurePoints(current);
   if (points.length === 0) {
     map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
     return;
@@ -67,6 +82,7 @@ export function BrochureMap() {
   const selected = selectedStopId.value;
   const hidden = hiddenRouteIds.value;
   const staging = printPrep.value;
+  const geometry = routeGeometry.value;
 
   // ------------------------------------------------------------------ mount
   useEffect(() => {
@@ -83,6 +99,8 @@ export function BrochureMap() {
       scrollWheelZoom: false,
     });
     const tiles = createTileLayer().addTo(map);
+    // The routing endpoints are credited alongside the tiles (ADR 0001).
+    map.attributionControl?.addAttribution(routingAttributionHtml);
     mapRef.current = map;
     tileLayerRef.current = tiles;
 
@@ -164,6 +182,14 @@ export function BrochureMap() {
     fitToTour(map, tour.peek());
   }, [staging]);
 
+  // ----------------------------------------------------- road geometry
+  // The editor usually filled the cache already, so the switch into the
+  // brochure redraws road geometry synchronously; a brochure opened straight
+  // from a share link requests it here.
+  useEffect(() => {
+    syncRouteGeometry(current);
+  }, [current]);
+
   // -------------------------------------------------------------- polylines
   useEffect(() => {
     const map = mapRef.current;
@@ -173,11 +199,16 @@ export function BrochureMap() {
 
     for (const route of current.routes) {
       seen.add(route.id);
-      const latlngs = routeLatLngs(route);
+      const straight = routeLatLngs(route);
+      const geo = geometry[route.id];
+      // Straight line until the router answers, straight dashed line if it
+      // never does. The brochure never prints a blank route.
+      const latlngs = geo?.coords ?? straight;
+      const approximate = geo?.approximate ?? false;
       // Hiding a route is a screen-only reading aid; the printed brochure
       // always carries every route (see the legend's note).
       const visible =
-        (staging || !hidden.includes(route.id)) && latlngs.length >= 2;
+        (staging || !hidden.includes(route.id)) && straight.length >= 2;
       let line = lines.get(route.id);
       if (!line) {
         line = L.polyline(latlngs, { interactive: false });
@@ -188,6 +219,7 @@ export function BrochureMap() {
         color: safeColor(route.color),
         weight: 4,
         opacity: 0.9,
+        dashArray: approximate ? APPROXIMATE_DASH : undefined,
       });
       if (visible && !map.hasLayer(line)) line.addTo(map);
       if (!visible && map.hasLayer(line)) line.remove();
@@ -198,7 +230,7 @@ export function BrochureMap() {
       line.remove();
       lines.delete(id);
     }
-  }, [current, hidden, staging]);
+  }, [current, hidden, staging, geometry]);
 
   // ---------------------------------------------------------------- markers
   useEffect(() => {

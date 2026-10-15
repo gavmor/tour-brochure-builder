@@ -224,6 +224,32 @@
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
 }
 
+/* --------------------------------------------------------- route routing */
+
+/* Routing status for the active route: quiet by default, because "following
+   streets" is the expected case and does not deserve attention. */
+.route-status {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  color: #6b6459;
+}
+
+/* The approximate state does deserve attention — it is the one case where
+   what the author sees is not what the router said. Matched by the dashed
+   polyline on the map and the legend note in the brochure. */
+.route-status--approximate {
+  color: #8a5a00;
+}
+
+.route-status--approximate::before {
+  content: "";
+  display: inline-block;
+  width: 1.4rem;
+  margin-right: 0.35rem;
+  vertical-align: 0.2em;
+  border-top: 2px dashed currentColor;
+}
+
 .route-panel__actions {
   display: flex;
   align-items: center;
@@ -679,4 +705,154 @@
 
 .itinerary-row__category-icon {
   margin-right: 0.3rem;
+}
+
+/* ------------------------------------- "Add sites near a location" (epic §1) */
+
+.map-pane--picking .map-pane__canvas,
+.map-pane--picking .leaflet-grab,
+.map-pane--picking .leaflet-interactive {
+  cursor: crosshair;
+}
+
+.map-pane__hint--picking {
+  bottom: 3.75rem;
+  background: rgba(31, 58, 95, 0.95);
+}
+
+.nearby {
+  border: 1px solid #d8d2c4;
+  border-radius: 10px;
+  background: #fffdf8;
+  padding: 0.75rem;
+  margin-bottom: 0.9rem;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.nearby__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.nearby__title {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+.nearby__close {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #6b6557;
+}
+
+.nearby__search {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.nearby__input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.nearby__status {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #4a4539;
+}
+
+.nearby__status--ok {
+  color: #1e8449;
+}
+
+.nearby__status--warn {
+  color: #a0522d;
+}
+
+.nearby__loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.nearby__spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid #d8d2c4;
+  border-top-color: #1f3a5f;
+  border-radius: 50%;
+  animation: nearby-spin 0.8s linear infinite;
+}
+
+@keyframes nearby-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nearby__spinner {
+    animation-duration: 3s;
+  }
+}
+
+.nearby__bulk {
+  display: flex;
+  gap: 0.8rem;
+  margin: 0.6rem 0 0.3rem;
+  font-size: 0.85rem;
+}
+
+.nearby__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  border-top: 1px solid #eee7d8;
+}
+
+.nearby__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.1rem;
+  border-bottom: 1px solid #f2ecdd;
+  cursor: pointer;
+}
+
+.nearby__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearby__category {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: #6b6557;
+}
+
+.nearby__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/* Attribution is a licence term: it stays visible, never hidden behind a tip. */
+.nearby__attribution {
+  margin: 0.6rem 0 0;
+  font-size: 0.72rem;
+  color: #6b6557;
 }

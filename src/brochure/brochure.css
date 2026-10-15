@@ -391,6 +391,27 @@
   letter-spacing: 0.02em;
 }
 
+/* A route whose road geometry never arrived. The map draws it as a dashed
+   straight line; the key says so in words, because the brochure's polylines
+   are non-interactive and carry no tooltip — and because this has to survive
+   onto paper. */
+.bro-legend__dot--approximate {
+  border-radius: 1px;
+  height: 0.22rem;
+  width: 0.9rem;
+  /* A dashed chip: two slices of the route colour over the page. */
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0) 0 0.14rem,
+    #fff 0.14rem 0.26rem
+  );
+  box-shadow: none;
+}
+
+.bro-legend__meta--approximate {
+  font-style: italic;
+}
+
 .bro-legend__note {
   margin: 0.4rem 0 0;
   font-size: 0.68rem;
@@ -399,6 +420,12 @@
   font-family: var(--font-body);
   text-transform: none;
   letter-spacing: 0;
+}
+
+/* Declared after `.bro-legend__note` on purpose: same specificity, so the
+   later rule is the one that wins the colour. */
+.bro-legend__note--approximate {
+  color: inherit;
 }
 
 /* -------------------------------------------------------------- itinerary

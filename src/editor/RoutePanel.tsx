@@ -22,13 +22,14 @@ import {
   DEFAULT_ROUTE_COLOR,
   DEFAULT_ROUTE_PROFILE,
   deleteRoute,
-  ROUTE_PROFILES,
+  ROUTE_PROFILE_OPTIONS,
   readOnly,
   routeProfile,
   tour,
   updateRoute,
 } from "../tour";
 import { safeColor } from "./markers";
+import { approximateReason, geometryFor } from "./routeGeometry";
 import { shapeMode } from "./uiState";
 
 export function RoutePanel() {
@@ -40,11 +41,25 @@ export function RoutePanel() {
   if (!active) return null;
   const color = safeColor(active.color);
   const profile = routeProfile(active);
+  const geometry = geometryFor(active.id);
+  const routable = active.stops.length >= 2;
   const isPreset = COLOR_SWATCHES.some(
     (preset) => preset.toLowerCase() === color.toLowerCase(),
   );
   const isDefaultColor =
     color.toLowerCase() === DEFAULT_ROUTE_COLOR.toLowerCase();
+
+  // What the map is actually drawing for this route, in words — the "Car"
+  // button being pressed is not the same claim as "this line follows roads".
+  const routingStatus = !routable
+    ? "Add a second stop to follow the streets."
+    : geometry.pending
+      ? "Finding streets…"
+      : geometry.approximate
+        ? `Approximate — ${approximateReason(geometry.reason)}.`
+        : geometry.coords
+          ? "Following streets."
+          : "Straight line for now.";
 
   return (
     <section class="route-panel" aria-label="Routes">
@@ -79,7 +94,7 @@ export function RoutePanel() {
       <fieldset class="field field--group">
         <legend class="field__label">Getting around</legend>
         <div class="segmented">
-          {ROUTE_PROFILES.map((option) => {
+          {ROUTE_PROFILE_OPTIONS.map((option) => {
             const on = option.id === profile;
             return (
               <button
@@ -91,7 +106,7 @@ export function RoutePanel() {
                 title={`${option.label} route`}
                 onClick={() =>
                   updateRoute(active.id, {
-                    // The default (walking) is stored as absence (§6).
+                    // The default (foot) is stored as absence (§6, ADR 0001).
                     profile:
                       option.id === DEFAULT_ROUTE_PROFILE
                         ? undefined
@@ -105,6 +120,12 @@ export function RoutePanel() {
             );
           })}
         </div>
+        <p
+          class={`route-status${geometry.approximate ? " route-status--approximate" : ""}`}
+          role="status"
+        >
+          {routingStatus}
+        </p>
       </fieldset>
 
       <fieldset class="field field--group">
@@ -178,7 +199,8 @@ export function RoutePanel() {
             }}
           />
           <span>
-            Shape points <em>bend the line without a routing service</em>
+            Shape points{" "}
+            <em>bend the line by hand; the router treats them as waypoints</em>
           </span>
         </label>
         <button

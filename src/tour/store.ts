@@ -37,7 +37,12 @@ import {
   replaceLocationHash,
   type ShareLink,
 } from "./urlShare";
-import { type ParseResult, parseTour, serializeTour } from "./validate";
+import {
+  isUnrecognisedTour,
+  type ParseResult,
+  parseTour,
+  serializeTour,
+} from "./validate";
 
 /** The working tour. Treat as read-only outside this module. */
 export const tour = signal<Tour>(createTour());
@@ -58,6 +63,7 @@ export const lastLoadNotice = signal<{
 } | null>(null);
 
 export const routes = computed<Route[]>(() => tour.value.routes);
+
 export const stopCount = computed<number>(() => totalStops(tour.value));
 
 export const activeRoute = computed<Route | undefined>(() => {
@@ -70,10 +76,13 @@ export const activeRoute = computed<Route | undefined>(() => {
 export const shareLink = computed<ShareLink>(() =>
   buildShareLink(tour.value, { view: true }),
 );
+
 export const shareUrlLength = computed<number>(() => shareLink.value.urlLength);
+
 export const shareEncodedLength = computed<number>(
   () => shareLink.value.encodedLength,
 );
+
 export const shareUrlWarning = computed<"ok" | "warn" | "too-long">(() => {
   const link = shareLink.value;
   if (link.tooLong) return "too-long";
@@ -250,21 +259,30 @@ export function addRoute(init: Partial<Route> = {}): Route | null {
   return route;
 }
 
+/**
+ * Patch a route's fields. An `undefined` value *removes* the key rather than
+ * writing `undefined` into it — `{ profile: undefined }` is how the editor
+ * says "back to the default", and ADR 0001 requires the default to be absent
+ * from the serialized tour, not present-and-undefined.
+ */
 export function updateRoute(
   routeId: string,
   patch: Partial<Omit<Route, "id" | "stops">>,
 ): boolean {
   let found = false;
   mutate((draft) => {
-    const route = draft.routes.find((r) => r.id === routeId);
-    if (!route) return;
-    Object.assign(route, patch);
-    // An explicit `undefined` clears the field (e.g. resetting the profile to
-    // its default), which keeps it out of the serialized tour / share URL.
+    const index = draft.routes.findIndex((r) => r.id === routeId);
+    if (index === -1) return;
+    const next: Record<string, unknown> = { ...draft.routes[index] };
     for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined)
-        delete (route as unknown as Record<string, unknown>)[key];
+      if (value === undefined) delete next[key];
+      else next[key] = value;
     }
+    // Rebuilt through the factory, not assigned in place, so the key order
+    // always matches `createRoute` — a patch that adds `via` to a route that
+    // already carries `profile` would otherwise append it in the wrong place
+    // and the share payload would stop being byte-stable.
+    draft.routes[index] = createRoute(next as Partial<Route>, index);
     found = true;
   });
   return found;
@@ -387,12 +405,14 @@ export function editCopy(options: { titleSuffix?: string } = {}): Tour {
  * every later edit updates it.
  */
 let fallbackFactory: (() => Tour | unknown) | null = null;
+
 let fallbackSnapshot: string | null = null;
 
 /** The last hash this module wrote, so the watcher can ignore its own echo. */
 let lastWrittenHash: string | null = null;
 
 let pendingUrlWrite: Debounced<[Tour]> | null = null;
+
 let disposeUrlSync: (() => void) | null = null;
 
 /** The hash a given tour should occupy: empty while it still is the starter. */
@@ -463,6 +483,14 @@ export interface InitResult {
 }
 
 /**
+ * What the UI is told when a `#t=` payload decoded cleanly but described no
+ * tour at all. Kept as a constant so the bootstrap and the hash watcher say
+ * the same thing, and tests can assert on it.
+ */
+export const NOT_A_TOUR_ERROR =
+  "That link did not contain a tour; opened the starter tour instead.";
+
+/**
  * Apply a hash fragment to the store. Returns the parse result when the hash
  * carried a tour, or null when it carried none.
  */
@@ -473,6 +501,13 @@ export function applyHash(hash: string): ParseResult | null {
   if (!decoded.ok) {
     lastLoadNotice.value = { warnings: [], errors: decoded.errors };
     return decoded;
+  }
+  // Decoded, repairable, and still not a tour: treat it like a corrupt link
+  // rather than letting it blank the app (see `isUnrecognisedTour`).
+  if (isUnrecognisedTour(decoded)) {
+    resetToFallback();
+    lastLoadNotice.value = { warnings: [], errors: [NOT_A_TOUR_ERROR] };
+    return { ok: false, errors: [NOT_A_TOUR_ERROR] };
   }
   loadTour(decoded.tour, { readOnly: state.view });
   return decoded;
@@ -586,16 +621,17 @@ export function initStore(
 
   if (hash.encoded) {
     const decoded = decodeTour(hash.encoded);
-    if (decoded.ok) {
+    if (decoded.ok && !isUnrecognisedTour(decoded)) {
       loadTour(decoded.tour, { readOnly: hash.view });
       result.source = "url";
       result.readOnly = hash.view;
       result.warnings = decoded.warnings;
       return finish();
     }
-    // A corrupt payload is not worth stranding the user over: fall through to
-    // the starter, and let the URL writer replace the broken hash.
-    result.errors.push(...decoded.errors);
+    // Neither a corrupt payload nor a decodable one that turned out not to be
+    // a tour is worth stranding the user over: fall through to the starter,
+    // and let the URL writer replace the broken hash.
+    result.errors.push(...(decoded.ok ? [NOT_A_TOUR_ERROR] : decoded.errors));
   }
 
   result.source = hydrateFallback(result);
@@ -617,3 +653,4 @@ export function resetStore(): void {
     lastLoadNotice.value = null;
   });
 }
+// weave: run 'weave explain src/tour/store.ts' for per-hunk detail, 'weave check' to verify your resolution

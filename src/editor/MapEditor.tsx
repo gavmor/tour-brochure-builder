@@ -27,18 +27,29 @@ import {
   fixLeafletDefaultIcons,
 } from "./leafletSetup";
 import { badgeSignature, safeColor, stopIcon } from "./markers";
-import { type LatLng, routeBounds, routeLatLngs } from "./shape";
+import {
+  APPROXIMATE_DASH,
+  approximateTooltip,
+  routeDrawBounds,
+  routeGeometry,
+  routingAttributionHtml,
+  syncRouteGeometry,
+} from "./routeGeometry";
+import { type LatLng, routeLatLngs } from "./shape";
 import {
   addMode,
   fitRequest,
   hiddenRouteIds,
+  nearbyCenter,
+  nearbyPinMode,
+  nearbyProposals,
   round6,
   shapeMode,
 } from "./uiState";
 
-/** Every point the tour draws, for bounds fitting. */
+/** Every point the tour draws, for bounds fitting — road geometry included. */
 function tourPoints(current: Tour): LatLng[] {
-  return current.routes.flatMap(routeBounds);
+  return current.routes.flatMap(routeDrawBounds);
 }
 
 function fitToTour(map: L.Map, current: Tour): void {
@@ -59,6 +70,10 @@ export function MapEditor() {
   );
   const linesRef = useRef(new Map<string, L.Polyline>());
   const viaLayerRef = useRef<L.LayerGroup | null>(null);
+  /** The "search near here" centre, drawn while the POI dialog is working. */
+  const centreMarkerRef = useRef<L.CircleMarker | null>(null);
+  /** Provisional markers for the proposals currently on the checklist. */
+  const proposalLayerRef = useRef<L.LayerGroup | null>(null);
   /** Tour id whose bounds we already fitted — refit on load, not on every edit. */
   const fittedRef = useRef<string | null>(null);
   /** Set when the map itself caused the selection, so we do not pan under the user. */
@@ -68,10 +83,14 @@ export function MapEditor() {
   const selected = selectedStopId.value;
   const hidden = hiddenRouteIds.value;
   const armed = addMode.value;
+  const pinning = nearbyPinMode.value;
+  const searchCentre = nearbyCenter.value;
+  const proposals = nearbyProposals.value;
   const shaping = shapeMode.value;
   const locked = readOnly.value;
   const activeId = activeRoute.value?.id ?? null;
   const fitNonce = fitRequest.value;
+  const geometry = routeGeometry.value;
 
   // ------------------------------------------------------------------ mount
   useEffect(() => {
@@ -85,6 +104,10 @@ export function MapEditor() {
       zoomControl: true,
     });
     createTileLayer().addTo(map);
+    // The tile layer carries the OSM credit; the routing endpoints are a
+    // separate obligation and a separate line in the control (ADR 0001 /
+    // FOSSGIS usage policy).
+    map.attributionControl?.addAttribution(routingAttributionHtml);
     viaLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
@@ -101,6 +124,8 @@ export function MapEditor() {
       map.remove();
       mapRef.current = null;
       viaLayerRef.current = null;
+      centreMarkerRef.current = null;
+      proposalLayerRef.current = null;
       markers.clear();
       lines.clear();
     };
@@ -112,6 +137,17 @@ export function MapEditor() {
     if (!map) return;
 
     const onClick = (event: L.LeafletMouseEvent) => {
+      // Choosing a search centre for "Add sites near a location" wins over
+      // adding a stop: it is the mode the user armed most recently, and the
+      // two are mutually exclusive (see `openNearby`).
+      if (!locked && pinning) {
+        nearbyPinMode.value = false;
+        nearbyCenter.value = {
+          lat: round6(event.latlng.lat),
+          lng: round6(event.latlng.lng),
+        };
+        return;
+      }
       if (locked || !armed) {
         selectedStopId.value = null;
         return;
@@ -152,7 +188,70 @@ export function MapEditor() {
       map.off("click", onClick);
       map.getContainer().removeEventListener("keydown", onKeyDown);
     };
-  }, [armed, locked, activeId]);
+  }, [armed, pinning, locked, activeId]);
+
+  // ------------------------------------------------- the POI search centre
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const existing = centreMarkerRef.current;
+    if (!searchCentre) {
+      existing?.remove();
+      centreMarkerRef.current = null;
+      return;
+    }
+    const position: [number, number] = [searchCentre.lat, searchCentre.lng];
+    if (existing) {
+      existing.setLatLng(position);
+      return;
+    }
+    const marker = L.circleMarker(position, {
+      radius: 10,
+      color: "#1F3A5F",
+      weight: 2,
+      fillColor: "#1F3A5F",
+      fillOpacity: 0.25,
+      interactive: false,
+      className: "search-centre",
+    });
+    marker.addTo(map);
+    centreMarkerRef.current = marker;
+  }, [searchCentre]);
+
+  // ------------------------------------------ provisional POI proposals (§2)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    let layer = proposalLayerRef.current;
+    if (!layer) {
+      layer = L.layerGroup().addTo(map);
+      proposalLayerRef.current = layer;
+    }
+    layer.clearLayers();
+    for (const proposal of proposals) {
+      L.circleMarker([proposal.lat, proposal.lng], {
+        radius: 7,
+        color: "#1F3A5F",
+        weight: 2,
+        // Ticked proposals read as "will be added"; unticked ones as "offered".
+        fillColor: proposal.chosen ? "#1F3A5F" : "#ffffff",
+        fillOpacity: proposal.chosen ? 0.85 : 0.6,
+        interactive: true,
+        className: "poi-proposal",
+      })
+        .bindTooltip(proposal.title, { direction: "top" })
+        .addTo(layer);
+    }
+  }, [proposals]);
+
+  // ----------------------------------------------------- road geometry
+  // Ask the routing service for road geometry whenever the *request* changes
+  // (stops added, removed, reordered or moved; profile switched). Renames and
+  // recolors do not reach the network — `syncRouteGeometry` compares cache
+  // keys, and the service debounces what is left.
+  useEffect(() => {
+    syncRouteGeometry(current);
+  }, [current]);
 
   // -------------------------------------------------------------- polylines
   useEffect(() => {
@@ -163,8 +262,14 @@ export function MapEditor() {
 
     for (const route of current.routes) {
       seen.add(route.id);
-      const latlngs = routeLatLngs(route);
-      const visible = !hidden.includes(route.id) && latlngs.length >= 2;
+      // The straight line is the placeholder and the fallback: it is drawn
+      // the moment a route exists, and road geometry replaces it only once
+      // the router answers. A route is never blank.
+      const straight = routeLatLngs(route);
+      const geo = geometry[route.id];
+      const latlngs = geo?.coords ?? straight;
+      const approximate = geo?.approximate ?? false;
+      const visible = !hidden.includes(route.id) && straight.length >= 2;
       const isActive = route.id === activeId;
       let line = lines.get(route.id);
 
@@ -201,7 +306,20 @@ export function MapEditor() {
         color: safeColor(route.color),
         weight: isActive ? 5 : 3,
         opacity: isActive ? 0.95 : 0.6,
+        // Leaflet removes the attribute outright on a falsy `dashArray`, so
+        // this both sets and clears the approximate styling.
+        dashArray: approximate ? APPROXIMATE_DASH : undefined,
       });
+      // Say *why* the line is straight. Leaflet tooltips are pointer-events
+      // none, so this does not get in the way of shift-click shaping.
+      if (approximate) {
+        line.bindTooltip(approximateTooltip(geo?.reason), {
+          sticky: true,
+          className: "route-tooltip--approximate",
+        });
+      } else {
+        line.unbindTooltip();
+      }
       if (visible && !map.hasLayer(line)) line.addTo(map);
       if (!visible && map.hasLayer(line)) line.remove();
     }
@@ -211,7 +329,7 @@ export function MapEditor() {
       line.remove();
       lines.delete(id);
     }
-  }, [current, hidden, activeId]);
+  }, [current, hidden, activeId, geometry]);
 
   // ---------------------------------------------------------------- markers
   useEffect(() => {
@@ -381,7 +499,11 @@ export function MapEditor() {
   }, [selected]);
 
   return (
-    <div class={`map-pane${armed && !locked ? " map-pane--adding" : ""}`}>
+    <div
+      class={`map-pane${armed && !locked ? " map-pane--adding" : ""}${
+        pinning && !locked ? " map-pane--picking" : ""
+      }`}
+    >
       {/*
         The class on the Leaflet host is static on purpose. Leaflet adds its
         own classes (`leaflet-container` and friends, which carry the layout
@@ -397,6 +519,12 @@ export function MapEditor() {
         <p class="map-pane__hint" role="status">
           Click the map to add a stop (or focus the map and press Enter to add
           one at the centre). Press <kbd>Esc</kbd> to stop adding.
+        </p>
+      ) : null}
+      {pinning && !locked ? (
+        <p class="map-pane__hint map-pane__hint--picking" role="status">
+          Click the map to choose the centre of the &ldquo;sites near a
+          location&rdquo; search.
         </p>
       ) : null}
       {shaping && !locked ? (
