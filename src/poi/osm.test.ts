@@ -83,12 +83,12 @@ describe("Nominatim parsing", () => {
 
 describe("bbox helpers", () => {
   it("clamps a metro-sized bbox down to one query's worth", () => {
-    const clamped = clampBbox(
-      { south: 40, north: 43, west: -89, east: -86 },
-      0.25,
-    );
-    expect(clamped.north - clamped.south).toBeLessThanOrEqual(0.2501);
-    expect(clamped.east - clamped.west).toBeLessThanOrEqual(0.2501);
+    const clamped = clampBbox({ south: 40, north: 43, west: -89, east: -86 });
+    expect(clamped.north - clamped.south).toBeLessThanOrEqual(0.1001);
+    expect(clamped.east - clamped.west).toBeLessThanOrEqual(0.1001);
+    // Still centred on what the user asked for.
+    expect((clamped.north + clamped.south) / 2).toBeCloseTo(41.5, 6);
+    expect((clamped.east + clamped.west) / 2).toBeCloseTo(-87.5, 6);
   });
 
   it("leaves a small bbox alone", () => {
