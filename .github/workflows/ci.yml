@@ -59,6 +59,12 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
+      # `e2e/print-bleed-safe.spec.ts` prints a PDF and measures the ink in it;
+      # `pdftoppm` is how it rasterises. The spec fails rather than skips when
+      # the tool is missing on CI, so this step is load-bearing.
+      - name: Install poppler-utils (pdftoppm)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Run Playwright acceptance tests
         run: pnpm test:e2e
 

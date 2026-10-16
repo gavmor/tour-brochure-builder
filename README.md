@@ -238,8 +238,30 @@ would eat them:
   is a tile-licence obligation, so it floats over the map's bottom-right corner
   rather than riding in a white band across the bleed edge.
 - the continuation sheets (itinerary spill, stop detail cards) keep the same
-  0.22 in inset. They are white on white — there is no background to bleed —
-  so an inset costs nothing and running body copy into the edge would lose text.
+  0.22 in inset on **every** sheet, not just the first. They are white on white
+  — there is no background to bleed — so an inset costs nothing and running body
+  copy into the edge would lose text.
+
+  That inset cannot be container padding. CSS fragmentation applies a box's
+  `padding-top` only to its *first* fragment and `padding-bottom` only to its
+  last, so a tour needing two sheets of detail cards printed the second one
+  flush to the top trim. The top and bottom halves of the inset therefore come
+  from a **named page** — `.bro-cards, .bro-spill { page: continuation }` plus
+  `@page continuation { margin: var(--bleed-safe) 0 }` — which is per *page* and
+  so applies to every fragment. The left and right halves stay as padding,
+  because inline padding already survives fragmentation, and because a
+  horizontal `@page` margin would make Chromium shrink the whole document to fit
+  its narrowest page and open a white band down page 1's right edge.
+
+  `--bleed-safe` is declared on `:root` rather than on `.brochure` for the same
+  reason: the page context resolves custom properties against the root element,
+  so a value on a class makes that margin silently compute to zero.
+
+  `e2e/print-bleed-safe.spec.ts` prints a 28-stop tour, rasterises the PDF with
+  `pdftoppm` and asserts both halves of the bargain — at least 0.2 in of clear
+  paper on every continuation sheet, and zero white band on all four edges of
+  page 1. It needs `poppler-utils` installed; without it the spec skips locally
+  and fails on CI rather than passing silently.
 
 ### Printer caveat
 
