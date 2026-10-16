@@ -19,6 +19,18 @@
 @import "../fonts/fonts.css";
 @import "../shared/stopBadge.css";
 
+/* How far anything that must stay *readable* is held off the paper edge.
+   Full bleed means backgrounds reach the trim; text and the OSM credit do
+   not, because a printer's non-printable margin would eat them.
+
+   Declared on `:root` rather than on `.brochure` because the continuation
+   sheets get this inset from `@page continuation { margin: var(--bleed-safe) }`
+   (see the print block), and the page context inherits custom properties from
+   the *root element* — a value declared on a class is invisible to it. */
+:root {
+  --bleed-safe: 0.22in;
+}
+
 .brochure {
   /* The sheet itself. There is no page margin to subtract: full bleed is the
      decision, so content runs to all four edges (see README → Printing). */
@@ -34,10 +46,9 @@
   --map-w: calc(var(--sheet-w) / 3 * 2); /* panels 1–2, up to the 2nd fold */
   --col-w: var(--panel-w); /* panel 3, from the 2nd fold to the right edge */
   --fold-safe: 0.3in; /* > 0.2in of clearance from the fold at 7.333in */
-  /* How far anything that must stay *readable* is held off the paper edge.
-     Full bleed means backgrounds reach the trim; text and the OSM credit do
-     not, because a printer's non-printable margin would eat them. */
-  --bleed-safe: 0.22in;
+  /* `--bleed-safe` is declared on `:root` above, not here: the continuation
+     sheets' `@page continuation` margin needs it and the page context can
+     only see custom properties from the root element. */
 
   --ink: #22303c;
   --muted: #6b6257;
@@ -866,6 +877,33 @@
     margin: 0;
   }
 
+  /* The continuation sheets are white on white — there is no background to
+     bleed — so they keep a `--bleed-safe` inset instead. The *block* half of
+     that inset comes from a named page, not from container padding.
+
+     Why split it across two mechanisms:
+
+     - Top/bottom must come from the page, because CSS fragmentation applies a
+       box's `padding-top` only to its first fragment and `padding-bottom` only
+       to its last. `.bro-cards { padding: var(--bleed-safe) }` therefore left
+       every cards sheet after the first flush to the top trim (card hairline
+       on raster row 0, first body line 0.133in from the paper edge). A page
+       margin is per *page*, so every fragment gets it.
+     - Left/right must NOT come from the page. Chromium prints a document at a
+       single shrink-to-fit factor derived from the narrowest page content
+       width, so a horizontal margin here would scale page 1 — the full-bleed
+       tri-fold sheet, which is exactly `--sheet-w` wide — down to 96% and open
+       a white band down its right edge. Inline padding has no such problem:
+       it is applied to every fragment already, which is why the left and right
+       insets were the two the bug never touched.
+
+     `var()` resolves here because `--bleed-safe` is declared on `:root`: the
+     page context inherits from the root element, not from `.brochure`. */
+  @page continuation {
+    size: letter landscape;
+    margin: var(--bleed-safe) 0;
+  }
+
   /* Nothing between the sheet and the paper: any residual html/body/#app box
      model would print as exactly the white frame this change removes. */
   html,
@@ -1057,12 +1095,17 @@
   }
 
   /* Continuation pages: stop detail cards, three balanced columns.
-     These sheets are white on white — there is no background to bleed — so
-     they keep a `--bleed-safe` inset instead. Running body copy into the
-     printer's non-printable margin would only lose text. */
+     Top/bottom inset from `@page continuation` (every fragment gets it);
+     left/right from this padding (fragmentation keeps inline padding on every
+     fragment). See the `@page continuation` rule above for why it is split. */
+  .bro-cards,
+  .bro-spill {
+    page: continuation;
+    padding: 0 var(--bleed-safe);
+  }
+
   .bro-cards {
     break-before: page;
-    padding: var(--bleed-safe);
     box-shadow: none;
     column-count: 3;
     column-gap: 0.3in;
@@ -1081,7 +1124,6 @@
   .bro-spill {
     display: block;
     break-before: page;
-    padding: var(--bleed-safe);
     column-count: 3;
     column-gap: 0.3in;
     column-fill: balance;

@@ -15,6 +15,10 @@
  *     anywhere that would print a white frame;
  *   - exact thirds: the panels are 11in/3, so the folds are at 11/3in and
  *     22/3in and the map/itinerary boundary is the second fold;
+ *   - the *mechanism* that keeps the white-on-white continuation sheets off
+ *     the trim on every fragment (a named `@page continuation`, not container
+ *     padding) — the effect itself is measured on a real PDF by
+ *     `e2e/print-bleed-safe.spec.ts`, because jsdom cannot fragment a page;
  *   - the print guarantees that must survive a geometry change: card
  *     break-avoidance, a visible OSM credit, and backgrounds that do not get
  *     dropped to save ink.
@@ -137,8 +141,14 @@ describe("@page", () => {
     expect(page).not.toMatch(/margin-(top|right|bottom|left)\s*:/);
   });
 
-  it("is declared once, so no later block can reinstate a margin", () => {
-    expect(css.match(/@page\b/g)).toHaveLength(1);
+  it("declares exactly two pages: the full-bleed one and the continuation", () => {
+    // Two `@page` rules now: the unnamed full-bleed one above, and the named
+    // `continuation` page that insets the white-on-white sheets. The unnamed
+    // one must still be the only rule that can set page 1's margin.
+    const names = Array.from(css.matchAll(/@page\s*([\w-]*)\s*\{/g)).map(
+      (match) => match[1],
+    );
+    expect(names).toEqual(["", "continuation"]);
   });
 });
 
@@ -278,12 +288,62 @@ describe("print guarantees that must survive the bleed", () => {
   });
 
   it("keeps the white-on-white continuation sheets readable", () => {
-    // No background to bleed there, so body copy stays off the trim.
-    expect(print).toMatch(
-      /\.bro-cards\s*\{[^}]*padding:\s*var\(--bleed-safe\);/,
+    // The acceptance test for this is `e2e/print-bleed-safe.spec.ts`, which
+    // prints a PDF and measures the ink; a stylesheet regex cannot fragment a
+    // page. What *can* be pinned here is the mechanism, because the obvious
+    // shape is the broken one: container padding. CSS fragmentation applies a
+    // box's `padding-top` only to its first fragment and `padding-bottom` only
+    // to its last, so `.bro-cards { padding: var(--bleed-safe) }` printed
+    // every cards sheet after the first flush to the top trim.
+    for (const selector of ["bro-cards", "bro-spill"]) {
+      expect(
+        print,
+        `.${selector} must be assigned to the continuation page; a block-axis ` +
+          "inset cannot come from container padding.",
+      ).toMatch(
+        new RegExp(`\\.${selector}[^{}]*\\{[^}]*page:\\s*continuation;`),
+      );
+    }
+
+    const continuation =
+      /@page\s+continuation\s*\{([^}]*)\}/.exec(print)?.[1] ?? "";
+    expect(continuation, "no @page continuation rule in brochure.css").not.toBe(
+      "",
     );
+
+    // Top and bottom from the page (every fragment gets it), left and right
+    // zero. A horizontal page margin here would make Chromium shrink the whole
+    // document to its narrowest page and open a white band down page 1.
+    expect(continuation).toMatch(/margin:\s*var\(--bleed-safe\)\s+0\s*;/);
+
+    // …so the inline halves come from padding, which fragmentation does keep.
     expect(print).toMatch(
-      /\.bro-spill\s*\{[^}]*padding:\s*var\(--bleed-safe\);/,
+      /\.bro-cards,\s*\.bro-spill\s*\{[^}]*padding:\s*0 var\(--bleed-safe\);/,
     );
+
+    // The one silent failure mode: `@page` resolves custom properties against
+    // the *root element*, so a `--bleed-safe` declared on `.brochure` would
+    // make the margin above compute to nothing and bring the bug straight
+    // back, with every declaration still present and this file still green.
+    expect(
+      /:root\s*\{[^}]*--bleed-safe:/.test(css),
+      "--bleed-safe must be declared on :root, or @page continuation's " +
+        "margin silently resolves to 0 and the inset is lost again.",
+    ).toBe(true);
+  });
+
+  it("does not try to carry the continuation inset in container padding", () => {
+    // The regression this whole card is about: a four-sided padding shorthand,
+    // or an explicit block-axis padding, on either continuation container.
+    for (const selector of ["\\.bro-cards", "\\.bro-spill"]) {
+      const rules = print.match(
+        new RegExp(`${selector}[^{}]*\\{[^}]*\\}`, "g"),
+      );
+      for (const rule of rules ?? []) {
+        expect(rule).not.toMatch(
+          /padding(-top|-bottom)?:\s*var\(--bleed-safe\)/,
+        );
+      }
+    }
   });
 });
